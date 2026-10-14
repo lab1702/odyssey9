@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"os"
 	"slices"
@@ -82,6 +81,7 @@ type game struct {
 	clean    [machine.Steps]byte // the program as last saved or loaded
 	pending  string              // action waiting to be confirmed by repeating it
 	pendFor  time.Duration
+	pendMem  [machine.Steps]byte // the program it was asked about
 	keyLit   map[machine.Key]int // frames left to show a key as pressed
 	mouseKey machine.Key
 	kb       hostKeyboard
@@ -195,13 +195,14 @@ func (g *game) unsaved() bool {
 }
 
 // confirm reports whether action was requested a second time within a few
-// seconds. The first time, it shows prompt and returns false.
+// seconds, with the program unchanged since. The first time, it shows
+// prompt and returns false.
 func (g *game) confirm(action, prompt string) bool {
-	if g.pending == action && g.pendFor > 0 {
+	if g.pending == action && g.pendFor > 0 && g.pendMem == g.m.Mem {
 		g.pending = ""
 		return true
 	}
-	g.pending, g.pendFor = action, confirmTime
+	g.pending, g.pendFor, g.pendMem = action, confirmTime, g.m.Mem
 	g.showToast(prompt)
 	return false
 }
@@ -294,9 +295,12 @@ func (g *game) closeWindow() bool {
 func (g *game) Update() error {
 	now := time.Now()
 	dt := now.Sub(g.last)
-	if g.last.IsZero() || dt > 100*time.Millisecond {
+	// After a stall, such as while the window is dragged, don't try to
+	// catch up, but at a low frame rate, keep time.
+	if g.last.IsZero() {
 		dt = time.Second / 60
 	}
+	dt = min(dt, 100*time.Millisecond)
 	g.last = now
 	g.frame++
 	if g.quit {
@@ -307,7 +311,8 @@ func (g *game) Update() error {
 	}
 	select {
 	case s := <-g.signals:
-		return fmt.Errorf("stopped by signal: %v", s)
+		stopping.Store(true)
+		return stopSignal{s}
 	default:
 	}
 	if ebiten.IsWindowBeingClosed() && g.closeWindow() {
@@ -420,4 +425,5 @@ func (g *game) togglePower() {
 	g.power = !g.power
 	g.m.PowerOn() // switching off erases the program, as on the real console
 	g.keys, g.held = g.keys[:0], 0
+	g.pending, g.toastFor = "", 0 // nothing asked about before still stands
 }

@@ -12,3 +12,6 @@ import (
 // Logging off and shutting down don't: Windows doesn't tell a console
 // program that has windows about them.
 var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+// raise does nothing: only Unix tells how a program stopped by its exit.
+func raise(os.Signal) {}

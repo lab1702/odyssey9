@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -12,7 +13,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -77,7 +79,6 @@ func main() {
 		// -script and can be made again. Keep it before saying anything, as
 		// writing to a pipe whose reader has gone, such as a "| tee" that
 		// Ctrl+C stopped too, stops the emulator.
-		stopping.Lock() // a second Ctrl+C now waits for this
 		var kept string
 		var keepErr error
 		if g.unsaved() && *shot == "" {
@@ -94,21 +95,36 @@ func main() {
 		} else if kept != "" {
 			fmt.Fprintln(os.Stderr, "Your unsaved program was saved in", kept)
 		}
+		// Stopped by a signal, stop as the signal would have, so that a
+		// script running the emulator stops too after Ctrl+C.
+		var s stopSignal
+		if errors.As(err, &s) {
+			raise(s.Signal)
+		}
 		os.Exit(1)
 	}
 }
 
-// stopping is held while the emulator stops after an error, keeping an
-// unsaved program.
-var stopping sync.Mutex
+// stopSignal is the error Update returns when a signal stops the emulator.
+type stopSignal struct{ os.Signal }
+
+func (s stopSignal) Error() string { return "stopped by signal: " + s.String() }
+
+// stopping is set when Update has taken the signal to stop, and the
+// emulator is on its way to keeping any unsaved program.
+var stopping atomic.Bool
 
 // notifyStop returns a channel that receives the first signal asking the
 // emulator to stop, such as Ctrl+C in the terminal it was started from, or
 // the terminal closing. Update then stops it as an error does, so that an
-// unsaved program is kept. A second Ctrl+C stops it at once, as the game
-// loop may be held up, but only once any unsaved program is kept. Other
-// signals that follow are ignored: closing a terminal can send two
-// hangups, and logging out can send a hangup and SIGTERM.
+// unsaved program is kept.
+//
+// A second Ctrl+C stops it at once, as the game loop may be held up, but
+// not while the program is being kept, nor before the game loop has had
+// time to take the first: some programs that run others, such as timeout,
+// pass on a Ctrl+C the terminal sent them both. Other signals that follow
+// are ignored: closing a terminal can send two hangups, and logging out
+// can send a hangup and SIGTERM.
 func notifyStop() <-chan os.Signal {
 	var sigs []os.Signal
 	for _, s := range stopSignals {
@@ -127,10 +143,18 @@ func notifyStop() <-chan os.Signal {
 	go func() {
 		stop <- <-c
 		for s := range c {
-			if s == os.Interrupt {
-				stopping.Lock()
-				os.Exit(1)
+			if s != os.Interrupt {
+				continue
 			}
+			wait := time.Second
+			for t := time.Now(); !stopping.Load() && time.Since(t) < wait; {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if stopping.Load() {
+				time.Sleep(5 * time.Second) // main exits once the program is kept
+			}
+			fmt.Fprintln(os.Stderr, "Stopped at once, without keeping any unsaved program")
+			os.Exit(1)
 		}
 	}()
 	return stop

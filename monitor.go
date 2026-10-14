@@ -27,6 +27,10 @@ func (g *game) drawMonitor(c canvas) {
 	dim, ink, hi := rgb(0x7D8596), rgb(0xD6DBE6), rgb(0xFFD25A)
 	y := float32(24)
 	c.text("MONITOR", fontBold, 14, x0+20, y, ink, -1)
+	if !g.power {
+		c.text("OFF", fontMono, 12, x0+monitorW-20, y, dim, 1)
+		return
+	}
 	c.text(m.Mode().String(), fontMono, 12, x0+monitorW-20, y, hi, 1)
 	y += 30
 	c.text(fmt.Sprintf("ACCUM %02X   PC %02d   SUBR %02d", m.A, m.PC, m.S), fontMono, 13, x0+20, y, ink, -1)

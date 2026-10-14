@@ -269,11 +269,15 @@ func openChecked(name string, flag int, perm fs.FileMode) (*os.File, error) {
 // back, so the old program isn't lost. The old contents' space is still
 // the file's, so putting them back needs no more.
 func writeInPlace(name string, data []byte) error {
+	// A file too large to be a listing isn't kept to put back.
 	var old []byte
 	r, rerr := openPlain(name, os.O_RDONLY, 0)
 	if rerr == nil {
-		old, rerr = io.ReadAll(r)
+		old, rerr = io.ReadAll(io.LimitReader(r, maxListing+1))
 		r.Close()
+		if len(old) > maxListing {
+			rerr = errors.New("too large")
+		}
 	}
 	f, err := openPlain(name, os.O_WRONLY, 0)
 	if err != nil {

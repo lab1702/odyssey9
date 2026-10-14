@@ -4,9 +4,18 @@ package main
 
 import (
 	"os"
+	"os/signal"
 	"syscall"
+	"time"
 )
 
 // stopSignals are the signals that ask the emulator to stop (see
 // notifyStop): Ctrl+C, the system's request, and the terminal closing.
 var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
+// raise stops the emulator with the signal s, as if it hadn't been caught.
+func raise(s os.Signal) {
+	signal.Reset(s)
+	syscall.Kill(syscall.Getpid(), s.(syscall.Signal))
+	time.Sleep(time.Second) // for the signal to arrive
+}
