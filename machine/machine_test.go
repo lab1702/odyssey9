@@ -3,6 +3,7 @@ package machine
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -341,6 +342,7 @@ func TestFlashCardProgram(t *testing.T) {
 // The original Creepy Crawler piles little men up around the screen.
 func TestCreepyCrawler(t *testing.T) {
 	m := New()
+	m.rng = rand.New(rand.NewSource(1)) // some leave only two men after 500 steps
 	m.LoadProgram(Samples[0].Program())
 	m.Press(KeyE)
 	buzzed := false
@@ -647,8 +649,8 @@ func TestResetStopsSound(t *testing.T) {
 	}
 }
 
-// Leftover FAST budget must not burst out when the speed is lowered during
-// a SIG buzz.
+// Switching to SLOW during a SIG buzz doesn't let the program run ahead
+// once the buzz ends.
 func TestSpeedChangeDuringSig(t *testing.T) {
 	var prog [Steps]byte
 	prog[0] = 0x05 // SIG
@@ -901,5 +903,90 @@ func TestExamplesMatchSamples(t *testing.T) {
 		if string(got) != want {
 			t.Errorf("examples/%s differs from Samples[%d]; regenerate it with TestExportSamples", name, i)
 		}
+	}
+}
+
+// Flash Card's problem blinks until it is solved.
+func TestFlashCardBlinks(t *testing.T) {
+	m := New()
+	m.Press(Key2)
+	shown := func() bool { return strings.TrimSpace(screenText(m)) != "" }
+	for i, want := range []bool{false, true, false} {
+		for range 40 { // 2/3 s: longer than either blink
+			m.Update(time.Second / 60)
+			if shown() == want {
+				break
+			}
+		}
+		if shown() != want {
+			t.Fatalf("blink %d: problem shown %v, want %v", i, shown(), want)
+		}
+	}
+}
+
+// Between the Sheets starts the next round after showing the answer.
+func TestBetweenSheetsNextRound(t *testing.T) {
+	m := New()
+	m.Press(Key4)
+	g := m.game.(*betweenSheets)
+	g.lo, g.hi, g.secret = 3, 7, 5
+	m.Press(KeyYes)
+	for range 150 { // 2.5 s
+		m.Update(time.Second / 60)
+	}
+	if !g.waiting {
+		t.Error("no new round 2.5 s after the answer")
+	}
+}
+
+// Opcodes the manual doesn't list do nothing.
+func TestUndefinedOpcodeDoesNothing(t *testing.T) {
+	m := New()
+	m.LoadProgram(&[Steps]byte{0x06, 0x03, 0xFF}) // ?, INC, HLT
+	m.Press(KeyE)
+	for range 10 {
+		m.Step()
+	}
+	if m.A != 0x01 || m.Status() != "HALT" {
+		t.Errorf("A=%02X, status %q; want 01 and HALT", m.A, m.Status())
+	}
+}
+
+// The ERROR note goes after a moment.
+func TestErrorNoteClears(t *testing.T) {
+	m := New()
+	for _, k := range []Key{KeyReset, KeyP, KeyA, KeyI, KeyX, KeyEnter} {
+		m.Press(k)
+	}
+	if !strings.Contains(m.Status(), "ERROR") {
+		t.Fatalf("status %q after a bad statement, want ERROR", m.Status())
+	}
+	m.Update(2 * time.Second)
+	if strings.Contains(m.Status(), "ERROR") {
+		t.Errorf("status %q 2 s later", m.Status())
+	}
+}
+
+// Keys read by INP have the codes in the manual's Key Codes table.
+func TestKeyCodes(t *testing.T) {
+	for k, want := range map[Key]byte{KeyYes: 0x2C, KeyNo: 0x2D, KeyClear: 0x2E, KeyEnter: 0x2F, KeyQuestion: 0x0D, Key7: 0x07, KeyA: 0x20} {
+		if got := k.Code(); got != want {
+			t.Errorf("%q: code %02X, want %02X", k.Rune(), got, want)
+		}
+	}
+}
+
+// Time spent waiting at INP isn't made up for once the key comes, even at
+// SLOW, where a stall isn't otherwise limited.
+func TestNoBurstAfterWaitingForKey(t *testing.T) {
+	m := assembled(t, nil, "INP.0", "INC", "GTO.01")
+	m.SetSpeed(SpeedSlow)
+	m.Press(KeyE)
+	m.Update(time.Second / 60)
+	m.Update(time.Minute)
+	m.Press(Key5)
+	m.Update(time.Second / 60)
+	if m.A > 0x01 {
+		t.Errorf("A=%02X: the program ran ahead after waiting a minute for a key", m.A)
 	}
 }

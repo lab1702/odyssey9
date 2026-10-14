@@ -119,12 +119,13 @@ var stopping atomic.Bool
 // the terminal closing. Update then stops it as an error does, so that an
 // unsaved program is kept.
 //
-// A second Ctrl+C stops it at once, as the game loop may be held up, but
-// not while the program is being kept, nor before the game loop has had
-// time to take the first: some programs that run others, such as timeout,
-// pass on a Ctrl+C the terminal sent them both. Other signals that follow
-// are ignored: closing a terminal can send two hangups, and logging out
-// can send a hangup and SIGTERM.
+// A second Ctrl+C stops it at once, as the game loop may be held up. But
+// some programs that run others, such as timeout, pass on a Ctrl+C the
+// terminal sent them both, so first it gives the game loop up to three
+// seconds to take the first (a minimized window can run its loop only once
+// a second), and then up to five more to keep the program. Other signals
+// that follow are ignored: closing a terminal can send two hangups, and
+// logging out can send a hangup and SIGTERM.
 func notifyStop() <-chan os.Signal {
 	var sigs []os.Signal
 	for _, s := range stopSignals {
@@ -146,14 +147,15 @@ func notifyStop() <-chan os.Signal {
 			if s != os.Interrupt {
 				continue
 			}
-			wait := time.Second
-			for t := time.Now(); !stopping.Load() && time.Since(t) < wait; {
+			for t := time.Now(); !stopping.Load() && time.Since(t) < 3*time.Second; {
 				time.Sleep(10 * time.Millisecond)
 			}
+			msg := "Stopped at once, without keeping any unsaved program"
 			if stopping.Load() {
 				time.Sleep(5 * time.Second) // main exits once the program is kept
+				msg = "Stopped before any unsaved program could be kept"
 			}
-			fmt.Fprintln(os.Stderr, "Stopped at once, without keeping any unsaved program")
+			fmt.Fprintln(os.Stderr, msg)
 			os.Exit(1)
 		}
 	}()

@@ -17,7 +17,9 @@ import (
 
 func testGame(t *testing.T) *game {
 	t.Helper()
-	return newGame(machine.New(), filepath.Join(t.TempDir(), "prog.txt"), false)
+	g := newGame(machine.New(), filepath.Join(t.TempDir(), "prog.txt"), false)
+	g.kb = hostKeyboard{} // whatever input method this computer has
+	return g
 }
 
 // typeStep enters a program step in Hex Input mode, so memory holds unsaved work.
@@ -72,10 +74,14 @@ func (k keyTick) input() keyInput {
 	}
 }
 
-// typed returns the keys a hostKeyboard makes of ticks, and which of them
-// are repeats.
+// typed returns the keys a hostKeyboard with an input method makes of
+// ticks, and which of them are repeats.
 func typed(ticks ...keyTick) (keys []machine.Key, repeats []bool) {
-	var kb hostKeyboard
+	return typedOn(&hostKeyboard{inputMethod: true}, ticks...)
+}
+
+// typedOn returns the keys kb makes of ticks, and which are repeats.
+func typedOn(kb *hostKeyboard, ticks ...keyTick) (keys []machine.Key, repeats []bool) {
 	for _, k := range ticks {
 		for _, hk := range kb.next(k.input()) {
 			keys, repeats = append(keys, hk.k), append(repeats, hk.repeat)
@@ -98,6 +104,7 @@ var (
 // typed in the same tick as Esc or Delete comes before them.
 func TestLateCharacterKeepsItsPlace(t *testing.T) {
 	esc := []ebiten.Key{ebiten.KeyEscape, ebiten.KeyE}
+	del := []ebiten.Key{ebiten.KeyDelete, ebiten.KeyE}
 	for _, c := range []struct {
 		ticks []keyTick
 		want  []machine.Key
@@ -109,6 +116,8 @@ func TestLateCharacterKeepsItsPlace(t *testing.T) {
 			[]machine.Key{machine.Key5, machine.KeyEnter}},
 		{[]keyTick{{chars: "E", pressed: esc}}, []machine.Key{machine.KeyE, machine.KeyReset}},
 		{[]keyTick{{pressed: esc}, {chars: "E"}}, []machine.Key{machine.KeyE, machine.KeyReset}},
+		{[]keyTick{{chars: "E", pressed: del}}, []machine.Key{machine.KeyE, machine.KeyClear}},
+		{[]keyTick{{pressed: del}, {chars: "E"}}, []machine.Key{machine.KeyE, machine.KeyClear}},
 	} {
 		if got, _ := typed(c.ticks...); !slices.Equal(got, c.want) {
 			t.Errorf("%+v: typed %v, want %v", c.ticks, got, c.want)
@@ -118,7 +127,7 @@ func TestLateCharacterKeepsItsPlace(t *testing.T) {
 	// briefly.
 	for _, frame := range []int{1, 3} {
 		ticks := []keyTick{{pressed: key5}, {pressed: keyEnter}}
-		for range (unknownLag + 2) * frame {
+		for range 3 * frame {
 			ticks = append(ticks, keyTick{sameFrame: len(ticks)%frame != 0})
 		}
 		if got, _ := typed(ticks...); !slices.Equal(got, []machine.Key{machine.KeyEnter}) {
@@ -128,7 +137,7 @@ func TestLateCharacterKeepsItsPlace(t *testing.T) {
 }
 
 // onTime returns ticks of n keys typed alone, their characters coming with
-// them, as without an input method.
+// them.
 func onTime(n int) []keyTick {
 	var ticks []keyTick
 	for range n {
@@ -137,45 +146,93 @@ func onTime(n int) []keyTick {
 	return ticks
 }
 
-// How late characters come is learned from keys pressed alone, even when
-// a character comes later than expected.
-func TestCharacterLagLearned(t *testing.T) {
-	for _, c := range []struct {
-		ticks []keyTick
-		want  int
-	}{
-		{onTime(onTimeToKnow - 1), unknownLag},
-		{onTime(onTimeToKnow), 0},
-		{[]keyTick{{pressed: keyE}, {chars: "E", held: keyE}}, 1},
-		{append(onTime(onTimeToKnow), keyTick{pressed: keyE}, keyTick{chars: "E"}), 1},
-		{append(onTime(1), keyTick{pressed: keyE}, keyTick{}, keyTick{chars: "E"}), 2},
-	} {
-		var kb hostKeyboard
-		for _, k := range c.ticks {
-			kb.next(k.input())
-		}
-		if got := kb.lag(); got != c.want {
-			t.Errorf("%+v: lag %d, want %d", c.ticks, got, c.want)
+// An X input method is found from XMODIFIERS.
+func TestInputMethodFound(t *testing.T) {
+	for m, want := range map[string]bool{"": false, "@im=ibus": true, "@im=fcitx": true, "@im=none": false} {
+		t.Setenv("XMODIFIERS", m)
+		if got := xInputMethod(); got != want {
+			t.Errorf("XMODIFIERS=%q: input method %v, want %v", m, got, want)
 		}
 	}
 }
 
-// Once characters are seen to come with their keys, as without an input
-// method, a key that types nothing stops waiting at the next input, so it
-// doesn't take the next key's character, and Enter typed after that keeps
-// its place. Three ticks a frame, as at 20 frames a second.
-func TestDeadKeyKeepsOrder(t *testing.T) {
-	ticks := onTime(onTimeToKnow)
-	frame := func(k keyTick) {
-		ticks = append(ticks, k, sameTick, sameTick)
+// How late characters come is learned from keys pressed alone. Without an
+// input method, one character that seems late, such as a quick tap
+// Ebitengine didn't see after a dead key, isn't enough.
+func TestCharacterLagLearned(t *testing.T) {
+	quote := keyTick{pressed: []ebiten.Key{ebiten.KeyQuote}}
+	seemsLate := []keyTick{quote, {chars: "I"}, {}}
+	seemsLate2 := []keyTick{quote, {chars: "J"}, {}}
+	for _, c := range []struct {
+		im    bool
+		ticks []keyTick
+		want  int
+	}{
+		{false, onTime(5), 0},
+		{true, onTime(5), 1},
+		{true, []keyTick{{pressed: keyE}, {}, {chars: "E"}}, 2},
+		{false, slices.Concat(seemsLate, onTime(5)), 0},
+		{false, slices.Concat(seemsLate, onTime(1), seemsLate2), 0},
+		{false, slices.Concat(seemsLate, seemsLate2), 1},
+	} {
+		kb := hostKeyboard{inputMethod: c.im}
+		typedOn(&kb, c.ticks...)
+		if got := kb.lag(); got != c.want {
+			t.Errorf("input method %v, %+v: lag %d, want %d", c.im, c.ticks, got, c.want)
+		}
 	}
-	frame(keyTick{pressed: []ebiten.Key{ebiten.KeyQuote}}) // a dead key
-	frame(keyTick{chars: "5", pressed: key5})
-	frame(keyTick{pressed: keyEnter})
-	frame(keyTick{chars: "0", pressed: []ebiten.Key{ebiten.KeyDigit0}})
+}
+
+// A key that types nothing, such as a dead key or a numpad key with NumLock
+// off, doesn't take the next key's character, so Enter or Backspace typed
+// after that keeps its place. Without an input method it stops waiting at
+// the next input; with one, a letter that comes while it waits isn't its.
+// Three ticks a frame, as at 20 frames a second.
+func TestKeyTypingNothingKeepsOrder(t *testing.T) {
+	for _, im := range []bool{false, true} {
+		for _, nothing := range []ebiten.Key{ebiten.KeyQuote, ebiten.KeyNumpad4} {
+			var ticks []keyTick
+			frame := func(k keyTick) {
+				ticks = append(ticks, k, sameTick, sameTick)
+			}
+			frame(keyTick{pressed: []ebiten.Key{nothing}})
+			frame(keyTick{chars: "D", pressed: keyD})
+			frame(keyTick{pressed: keyEnter})
+			frame(keyTick{chars: "A", pressed: []ebiten.Key{ebiten.KeyA}})
+			frame(keyTick{})
+			frame(keyTick{})
+			want := []machine.Key{machine.KeyD, machine.KeyEnter, machine.KeyA}
+			if got, _ := typedOn(&hostKeyboard{inputMethod: im}, ticks...); !slices.Equal(got, want) {
+				t.Errorf("input method %v, %v typing nothing: typed %v, want %v", im, nothing, got, want)
+			}
+		}
+	}
+}
+
+// With an input method, a character that comes two polls late still comes
+// before Enter pressed meanwhile, and is a press.
+func TestVeryLateCharacter(t *testing.T) {
+	keys, repeats := typed(append(onTime(5), keyTick{pressed: keyE}, keyTick{pressed: keyEnter, held: keyE},
+		keyTick{chars: "E", held: keyE}, keyTick{})...)
+	keys, repeats = keys[5:], repeats[5:]
+	if !slices.Equal(keys, []machine.Key{machine.KeyE, machine.KeyEnter}) || repeats[0] {
+		t.Errorf("typed %v, repeats %v, want E (a press) then ENTER", keys, repeats)
+	}
+}
+
+// At a low frame rate, a key let go and pressed again between two polls
+// isn't seen pressed again, but its character keeps its place. 15 frames a
+// second: E, Shift+8 (*), E within 100 ms.
+func TestMissedPressKeepsOrder(t *testing.T) {
+	var ticks []keyTick
+	frame := func(k keyTick) {
+		ticks = append(ticks, k, sameTick, sameTick, sameTick)
+	}
+	frame(keyTick{chars: "E", pressed: keyE})
+	frame(keyTick{chars: "*E", pressed: []ebiten.Key{ebiten.KeyDigit8, ebiten.KeyShiftLeft}, held: keyE})
 	frame(keyTick{})
-	want := []machine.Key{machine.Key5, machine.KeyEnter, machine.Key0}
-	if got, _ := typed(ticks...); !slices.Equal(got[onTimeToKnow:], want) {
+	want := []machine.Key{machine.KeyE, machine.KeyTimes, machine.KeyE}
+	if got, _ := typedOn(&hostKeyboard{}, ticks...); !slices.Equal(got, want) {
 		t.Errorf("typed %v, want %v", got, want)
 	}
 }
@@ -237,8 +294,8 @@ func TestRepeatsToldApart(t *testing.T) {
 		{[]keyTick{{pressed: []ebiten.Key{ebiten.KeyDigit1}}, {chars: "1", held: []ebiten.Key{ebiten.KeyDigit1}}, {chars: "1", held: []ebiten.Key{ebiten.KeyDigit1}},
 			{pressed: []ebiten.Key{ebiten.KeyDigit2}}, {chars: "12", held: []ebiten.Key{ebiten.KeyDigit2}}},
 			[]bool{false, true, true, false}},
-		// a key Ebitengine doesn't know types a character too
-		{[]keyTick{{chars: "?"}}, []bool{false}},
+		// a key Ebitengine doesn't know can't be told from a repeat
+		{[]keyTick{{chars: "?"}}, []bool{true}},
 	} {
 		if _, got := typed(c.ticks...); !slices.Equal(got, c.want) {
 			t.Errorf("%+v: repeats %v, want %v", c.ticks, got, c.want)
@@ -395,10 +452,8 @@ func TestRunningProgramGetsEveryKey(t *testing.T) {
 	}
 }
 
-// Keys left waiting for a program when the power goes off don't count
-// against the first key typed after it comes back on.
 // RESET pressed when the queue is full is passed on even if the program
-// has just stopped, which drops the keys left waiting for it.
+// has just stopped.
 func TestResetWithFullQueue(t *testing.T) {
 	g := testGame(t)
 	g.m.SetSpeed(0)
@@ -421,6 +476,101 @@ func TestResetWithFullQueue(t *testing.T) {
 	tick(g)
 	if got := g.m.Status(); got != "COMMAND" {
 		t.Errorf("status %q after RESET, want COMMAND", got)
+	}
+}
+
+// Keys typed for a program that stops before reading them are dropped,
+// not taken as commands.
+func TestStoppedProgramDropsWaitingKeys(t *testing.T) {
+	g := testGame(t)
+	g.m.LoadProgram(&[machine.Steps]byte{0x00, 0x00, 0xFF}) // NOP, NOP, HLT
+	g.m.SetSpeed(0)                                         // SLOW: 4 steps a second
+	g.press(machine.KeyE)
+	tick(g)
+	g.press(machine.KeyD) // DISPLAY, if taken as a command
+	for range 600 {
+		if tick(g); g.m.Mode() != machine.ModeExecute {
+			break
+		}
+	}
+	tick(g)
+	if got := g.m.Status(); got != "HALT" || len(g.keys) > 0 {
+		t.Errorf("status %q with %d keys left; want HALT and none", got, len(g.keys))
+	}
+}
+
+// Backspace erases a character typed in Input mode, and elsewhere is CLEAR,
+// but held down it only erases, and doesn't wait for a running program.
+func TestBackspace(t *testing.T) {
+	g := testGame(t)
+	for _, k := range []machine.Key{machine.KeyReset, machine.KeyP, machine.KeyM, machine.KeyI, machine.Key6, machine.KeyB, keyBackspace} {
+		g.press(k)
+	}
+	tick(g)
+	if got := g.m.Status(); got != "STEP 00 6" {
+		t.Errorf("status %q after 6B and Backspace, want STEP 00 6", got)
+	}
+	g.press(keyErase)
+	tick(g)
+	if got := strings.TrimSpace(g.m.Status()); got != "STEP 00" {
+		t.Errorf("status %q after erasing, want STEP 00", got)
+	}
+	cleared := machine.New()
+	for _, k := range []machine.Key{machine.KeyReset, machine.KeyP, machine.KeyClear} {
+		cleared.Press(k)
+	}
+	g.press(machine.KeyReset)
+	g.press(machine.KeyP)
+	g.press(keyErase)
+	tick(g)
+	if got := g.m.Status(); got != "PROGRAM" {
+		t.Errorf("status %q after a held Backspace in PROGRAM mode, want PROGRAM", got)
+	}
+	g.press(keyBackspace)
+	tick(g)
+	if got, want := g.m.Status(), cleared.Status(); got != want {
+		t.Errorf("status %q after Backspace in PROGRAM mode, want %q as after CLEAR", got, want)
+	}
+
+	g.m.LoadProgram(&[machine.Steps]byte{0x12, 0x00}) // GTO.00
+	g.press(machine.KeyReset)
+	g.press(machine.KeyE)
+	tick(g)
+	g.press(keyErase)
+	tick(g)
+	if len(g.keys) > 0 {
+		t.Errorf("a held Backspace waited for the running program")
+	}
+
+	// Held down, Backspace repeats after half a second, 15 times a second.
+	var kb hostKeyboard
+	var at []int
+	for ticks := 1; ticks <= 40; ticks++ {
+		for _, k := range kb.next(keyInput{backspace: ticks, newPoll: true}) {
+			at = append(at, ticks)
+			if want := keyErase; ticks == 1 {
+				want = keyBackspace
+				if k.k != want {
+					t.Errorf("tick %d: %v, want %v", ticks, k.k, want)
+				}
+			}
+		}
+	}
+	if want := []int{1, 30, 34, 38}; !slices.Equal(at, want) {
+		t.Errorf("held Backspace typed at ticks %v, want %v", at, want)
+	}
+}
+
+// A confirmation must come within four seconds.
+func TestConfirmationExpires(t *testing.T) {
+	g := testGame(t)
+	g.confirm("save", "again?")
+	g.pendFor -= confirmTime
+	if g.confirm("save", "again?") {
+		t.Error("SAVE confirmed after the four seconds")
+	}
+	if !g.confirm("save", "again?") {
+		t.Error("SAVE not confirmed at once")
 	}
 }
 

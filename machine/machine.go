@@ -96,7 +96,7 @@ type Machine struct {
 	speed int
 
 	// program entry
-	lang     Mode   // ModeAssembler or ModeHex: language for Input/Roll
+	lang     Mode   // ModeAssembler or ModeHex: language for Input mode
 	editStep int    // step shown in Input and Roll modes
 	inBuf    []rune // characters typed in Input mode
 	note     string // transient status message (e.g. "ERROR")

@@ -211,13 +211,13 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 | Path | Contents |
 |---|---|
 | `machine/` | the emulated computer, with no GUI code: CPU and modes (`machine.go`), the instruction table shared by the CPU and the assembler/disassembler, and decimal arithmetic (`asm.go`), games, font, key codes, listing format, sample programs, tests |
-| `main.go` | command-line options and start-up |
+| `main.go`, `signals_*.go` | command-line options, start-up, and stopping on Ctrl+C or a closed terminal with a recovery file |
 | `game.go` | emulator state and the update loop |
 | `tv.go` | drawing the TV screen and the buttons under it |
 | `input.go` | function keys, mouse, typed keys and dropped files |
-| `files.go` | SAVE, LOAD and loading the manual's programs |
+| `files.go`, `files_*.go` | SAVE, LOAD and loading the manual's programs, and the parts of saving that differ by system (Unix, Linux access control lists, Windows) |
 | `monitor.go`, `panels.go` | the monitor panel, and the help and programs panels |
-| `keyboard.go` | on-screen keyboard and host keyboard mapping |
+| `keyboard.go` | on-screen keyboard, and host keyboard mapping, including characters that come late from an input method |
 | `audio.go` | sound synthesis |
 | `draw.go` | resolution-independent drawing helpers |
 | `script.go` | scripted key input and screenshots, used for testing (`-script`, `-screenshot`) |

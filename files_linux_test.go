@@ -147,6 +147,31 @@ func TestFailedSaveThroughLinkLeavesNothing(t *testing.T) {
 	}
 }
 
+// A new file that can't be written in full isn't left half written.
+func TestFailedNewSaveLeavesNothing(t *testing.T) {
+	g := testGame(t)
+	g.m.LoadProgram(&[machine.Steps]byte{0x05, 0x06, 0x07, 0x08, 0x09, 0xFF})
+	var lim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
+		t.Skip(err)
+	}
+	small := lim
+	small.Cur = 10
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &small); err != nil {
+		t.Skip(err)
+	}
+	g.save()
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(g.toast, "Save failed") {
+		t.Fatalf("SAVE past the size limit: toast %q", g.toast)
+	}
+	if _, err := os.Stat(g.file); err == nil {
+		t.Errorf("failed SAVE left part of the program in %s", g.file)
+	}
+}
+
 // SAVE over a file with an access control list rewrites it in place, as
 // replacing it would lose the list and give its group the list's mask.
 func TestSaveKeepsACL(t *testing.T) {

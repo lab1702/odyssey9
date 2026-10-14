@@ -108,6 +108,7 @@ type game struct {
 func newGame(m *machine.Machine, file string, sound bool) *game {
 	g := &game{m: m, file: file, keyLit: map[machine.Key]int{}, scale: 1, width: baseW, power: true}
 	g.clean = m.Mem
+	g.kb.inputMethod = xInputMethod()
 	g.snd = newAudio(sound)
 	x := float32(20)
 	for _, id := range []buttonID{powerButton, speedButton, programsButton, saveButton, loadButton, monitorButton, helpButton} {

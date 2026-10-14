@@ -25,7 +25,7 @@ var scriptWords = map[string]machine.Key{
 // taking the screenshot, so the screen has settled.
 const shotDelay = 90
 
-// pseudo-keys that open the emulator's overlays
+// pseudo-keys for the emulator's HELP, PROGRAMS and SAVE buttons
 const (
 	scriptHelp     machine.Key = -1
 	scriptPrograms machine.Key = -2
