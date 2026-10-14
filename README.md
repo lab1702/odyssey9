@@ -190,7 +190,7 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 * **`SIG`** buzzes for one second, and the program pauses while it sounds.
 * **`HLT` (FF)** stops with **HALT** shown and puts you in Command mode. Then
   `D` `P` shows the step that holds the FF, and `C` continues from the
-  following step, even after a visit to Program mode or a game.
+  following step, even after RESET or a visit to Program mode or a game.
 * Undefined opcodes act as NOP. The manual's rule about adding a NOP after
   three outputs in a row was a hardware timing limit, and the emulator
   doesn't need it.

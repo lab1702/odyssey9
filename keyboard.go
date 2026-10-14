@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"runtime"
 	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -167,8 +168,27 @@ const (
 // pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
 // this tick.
 func pollKeyboard() []machine.Key {
-	return hostKeys(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
+	var chars []rune
+	if !shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
+		chars = ebiten.AppendInputChars(nil)
+	}
+	return hostKeys(chars, inpututil.AppendJustPressedKeys(nil),
 		inpututil.KeyPressDuration(ebiten.KeyBackspace))
+}
+
+// shortcutHeld reports whether a modifier is held that makes keys a
+// shortcut rather than typing, such as Cmd+S on a Mac or Alt+E on Windows.
+// Ebitengine still reports the characters of some shortcuts. AltGr, which
+// types [ and ] on many European keyboards, is Right Alt (with Ctrl on
+// Windows), so it is let through, and so is Option on a Mac.
+func shortcutHeld(goos string, held func(ebiten.Key) bool) bool {
+	if held(ebiten.KeyMeta) {
+		return true
+	}
+	if goos == "darwin" {
+		return held(ebiten.KeyControl)
+	}
+	return (held(ebiten.KeyControl) || held(ebiten.KeyAlt)) && !held(ebiten.KeyAltRight)
 }
 
 // hostKeys turns one tick of host keyboard input into Odyssey2 keys: the

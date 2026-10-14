@@ -328,6 +328,7 @@ func (m *Machine) reset() {
 		m.clearScreen()
 	}
 	m.mode = ModeCommand
+	m.showHalt = false // C still continues after a HLT
 }
 
 func (m *Machine) pressCommand(k Key) {

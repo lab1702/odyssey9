@@ -29,6 +29,12 @@ func main() {
 	script := flag.String("script", "", "testing aid: keys to type at start-up, e.g. \"{RESET}PMI6B{ENTER}\"")
 	shot := flag.String("screenshot", "", "testing aid: save a PNG after the script runs, then quit")
 	flag.Parse()
+	if flag.NArg() > 0 {
+		// Flags after it would be ignored too, so don't start without them.
+		fmt.Fprintf(os.Stderr, "Unexpected argument %q (use -load to open a program)\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
+	}
 	if err != nil && !isFlagSet("file") {
 		fmt.Fprintf(os.Stderr, "No home directory (%v): SAVE and LOAD use %s\n", err, *file)
 	}
@@ -69,8 +75,10 @@ func main() {
 		if msg := err.Error(); sound && (strings.HasPrefix(msg, "oto:") || strings.HasPrefix(msg, "audio:")) {
 			fmt.Fprintln(os.Stderr, "The sound output failed. Run with -mute to start without sound.")
 		}
-		// The error stops the emulator without asking, so keep the program.
-		if g.unsaved() {
+		// The error stops the emulator without asking, so keep the program,
+		// unless this is a screenshot run: its program came from -load and
+		// -script and can be made again.
+		if g.unsaved() && *shot == "" {
 			if name, err := g.saveRecovery(); err != nil {
 				fmt.Fprintln(os.Stderr, "Your unsaved program could not be kept:", err)
 			} else {

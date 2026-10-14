@@ -61,7 +61,7 @@ func TestSaveAsksBeforeReplacingUnreadableFile(t *testing.T) {
 	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(g.file, 0); err != nil {
+	if err := os.Chmod(g.file, 0o200); err != nil { // write-only
 		t.Fatal(err)
 	}
 	if _, err := os.ReadFile(g.file); err == nil {
@@ -199,5 +199,24 @@ func TestRecoveryKeepsProgram(t *testing.T) {
 	p, err := machine.ParseProgram(strings.NewReader(mustRead(t, name)))
 	if err != nil || *p != g.m.Mem {
 		t.Errorf("recovery file doesn't hold the program: %v", err)
+	}
+}
+
+func TestSaveRefusesReadOnlyFile(t *testing.T) {
+	g := testGame(t)
+	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.OpenFile(g.file, os.O_WRONLY, 0); err == nil {
+		f.Close()
+		t.Skip("read-only file still writable (running as root?)")
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	g.save()
+	if !strings.HasPrefix(g.toast, "Save failed") || !g.unsaved() {
+		t.Errorf("SAVE over a read-only file: toast %q", g.toast)
+	}
+	if got := mustRead(t, g.file); got != "00 05\n" {
+		t.Errorf("read-only file was replaced:\n%s", got)
 	}
 }

@@ -302,13 +302,35 @@ func (g *game) toggleOverlay(p panel) {
 func (g *game) toggleMonitor() {
 	ww, wh := ebiten.WindowSize()
 	g.monitor = !g.monitor
-	ebiten.SetWindowSize(int(float32(ww)*g.logicalW()/g.width), wh)
+	w := monitorWindowWidth(ww, wh, g.width, g.logicalW())
+	if w != ww {
+		ebiten.SetWindowSize(w, wh)
+	}
 	// Layout switches to the new width when the window changes size. A
-	// maximized or fullscreen window keeps its size, so it switches now.
+	// window that keeps its size (it already fits, or it is maximized or
+	// fullscreen) switches now.
 	g.resizeOf, g.resizeIn = g.outsideW, resizeWait
-	if ebiten.IsWindowMaximized() || ebiten.IsFullscreen() {
+	if w == ww || ebiten.IsWindowMaximized() || ebiten.IsFullscreen() {
 		g.resizeIn = 0
 	}
+}
+
+// monitorWindowWidth returns the window width to use when the logical width
+// changes from oldW to newW in a window of ww by wh, keeping the picture's
+// scale. The window grows only as far as the wider picture needs, and
+// shrinks only if the picture filled its width, so a window with room to
+// spare keeps its size.
+func monitorWindowWidth(ww, wh int, oldW, newW float32) int {
+	fits := float64(ww)/float64(oldW) <= float64(wh)/baseH // picture fills the width
+	s := math.Min(float64(ww)/float64(oldW), float64(wh)/baseH)
+	want := int(math.Round(float64(newW) * s))
+	if newW > oldW {
+		return max(ww, want)
+	}
+	if fits {
+		return want
+	}
+	return ww
 }
 
 func (g *game) togglePower() {

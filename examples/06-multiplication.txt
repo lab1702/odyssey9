@@ -1,5 +1,5 @@
 ; Multiplication (from the Computer Intro! manual)
-; Press E, then multiplicand and multiplier (2-9).
+; Press E, then multiplicand and multiplier (0-9).
 ; Step  Hex    Assembler
 00 6B 00  LDV.B.00
 02 70     INP.0

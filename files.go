@@ -42,6 +42,11 @@ func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
 }
 
 func (g *game) save() {
+	// A file that can't be written isn't replaced, so say so before asking.
+	if err := checkWritable(g.file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		g.showToast("Save failed: " + err.Error())
+		return
+	}
 	// Saving over a file that holds a different program, or one that can't
 	// be read, needs confirming.
 	old, err := readListing(os.Open(g.file))
@@ -76,9 +81,10 @@ func (g *game) save() {
 // temporary file next to name and then renames it, so a crash part-way
 // through never leaves name truncated. If name is a symlink, the file it
 // points to is written, and an existing file keeps its permissions. A new
-// file is created directly, with permissions set by the umask. A file with
-// other hard links, or in a folder where no temporary file can be made, is
-// rewritten in place instead, so that it stays the same file.
+// file is created directly, with permissions set by the umask. A file that
+// can't be opened for writing, such as a read-only one, is left alone. A
+// file with other hard links, or in a folder where no temporary file can be
+// made, is rewritten in place instead, so that it stays the same file.
 func writeFileAtomic(name string, data []byte) error {
 	name = followLinks(name)
 	fi, err := os.Stat(name)
@@ -86,6 +92,11 @@ func writeFileAtomic(name string, data []byte) error {
 		return writeFile(name, data, os.O_CREATE|os.O_EXCL)
 	}
 	if err != nil {
+		return err
+	}
+	// Renaming over a file only needs the folder to be writable, so check
+	// the file is, rather than replace one the user made read-only.
+	if err := checkWritable(name); err != nil {
 		return err
 	}
 	if linkCount(fi) > 1 {
@@ -115,6 +126,16 @@ func writeFileAtomic(name string, data []byte) error {
 		os.Remove(f.Name())
 	}
 	return err
+}
+
+// checkWritable returns the error from opening an existing file for
+// writing, if any.
+func checkWritable(name string) error {
+	f, err := os.OpenFile(name, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 // writeFile writes data to name, opened with the extra flags.

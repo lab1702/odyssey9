@@ -22,7 +22,7 @@ func (s Sample) Program() *[Steps]byte {
 // corrected (e.g. Creepy Crawler II step 08 is OTA = 0B, not 0A; Enter a
 // Letter B step 02 is INP.0 = 70, not 50).
 var Samples = []Sample{
-	{"Creepy Crawler", "Press E. The little man buzzes about the screen.", `
+	{"Creepy Crawler", "Press E. Little men buzz and pile up all over the screen.", `
 00 60 3A  LDV.0.3A  little man into Reg. 0
 02 61 0C  LDV.1.0C  blank into Reg. 1
 04 6B 00  LDV.B.00  position 00
@@ -107,7 +107,7 @@ var Samples = []Sample{
 28 6B 00  LDV.B.00
 30 12 03  GTO.03
 `},
-	{"Multiplication", "Press E, then multiplicand and multiplier (2-9).", `
+	{"Multiplication", "Press E, then multiplicand and multiplier (0-9).", `
 00 6B 00  LDV.B.00
 02 70     INP.0
 03 C0     OUT.0

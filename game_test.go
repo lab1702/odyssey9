@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -258,4 +259,51 @@ func mustRead(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestShortcutsDontType(t *testing.T) {
+	cases := []struct {
+		goos string
+		held []ebiten.Key
+		want bool
+	}{
+		{"linux", nil, false},
+		{"linux", []ebiten.Key{ebiten.KeyShift}, false},
+		{"linux", []ebiten.Key{ebiten.KeyControl}, true},
+		{"windows", []ebiten.Key{ebiten.KeyAlt}, true},
+		{"windows", []ebiten.Key{ebiten.KeyControl, ebiten.KeyAlt, ebiten.KeyAltRight}, false}, // AltGr
+		{"linux", []ebiten.Key{ebiten.KeyAlt, ebiten.KeyAltRight}, false},                      // AltGr
+		{"linux", []ebiten.Key{ebiten.KeyMeta}, true},
+		{"darwin", []ebiten.Key{ebiten.KeyMeta}, true}, // Cmd
+		{"darwin", []ebiten.Key{ebiten.KeyControl}, true},
+		{"darwin", []ebiten.Key{ebiten.KeyAlt}, false}, // Option types characters
+	}
+	for _, c := range cases {
+		held := func(k ebiten.Key) bool { return slices.Contains(c.held, k) }
+		if got := shortcutHeld(c.goos, held); got != c.want {
+			t.Errorf("%s with %v held: shortcut = %v, want %v", c.goos, c.held, got, c.want)
+		}
+	}
+}
+
+func TestMonitorWindowWidth(t *testing.T) {
+	const open = baseW + monitorW
+	cases := []struct {
+		name       string
+		ww, wh     int
+		oldW, newW float32
+		want       int
+	}{
+		{"open, picture fills the width", baseW, baseH, baseW, open, open},
+		{"close, picture fills the width", open, baseH, open, baseW, baseW},
+		{"open at double size", 2 * baseW, 2 * baseH, baseW, open, 2 * open},
+		{"open in a wide window", 2000, baseH, baseW, open, 2000},
+		{"close in a wide window", 2000, baseH, open, baseW, 2000},
+		{"open in a slightly wide window", 1000, baseH, baseW, open, open},
+	}
+	for _, c := range cases {
+		if got := monitorWindowWidth(c.ww, c.wh, c.oldW, c.newW); got != c.want {
+			t.Errorf("%s: width %d, want %d", c.name, got, c.want)
+		}
+	}
 }
