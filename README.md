@@ -1,5 +1,7 @@
 # Odyssey² Computer Intro! emulator (Videopac 9)
 
+![The emulator running the manual's Message program, with the monitor panel open](docs/screenshot.png)
+
 An emulator of the Magnavox Odyssey² with the **Computer Intro!** cartridge
 (Philips Videopac 9) inserted, written in Go with
 [Ebitengine](https://ebitengine.org) so it runs on Windows, macOS and Linux.
