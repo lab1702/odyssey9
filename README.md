@@ -68,7 +68,8 @@ Command-line options:
 If the emulator stops at start-up with an `oto:` or `audio:` error, your
 computer has no working sound output. Start it with `-mute`. If the sound
 output fails while you have an unsaved program, the emulator saves it next
-to the SAVE file as `odyssey9-recovered-….txt` before it stops.
+to the SAVE file as `odyssey9-recovered-….txt` before it stops, or in the
+system's temporary folder if it can't write there. It prints where.
 
 A `-script` is typed one key at a time. Letters, digits and the symbols in
 the PC keyboard table stand for themselves. `{RESET}`, `{ENTER}`,
@@ -149,7 +150,7 @@ ignored, and so is any text after `;` or `#`. So the step lines of the
 manual's tables load as they are:
 
 ```
-; Message program
+; lines from the manual's tables
 04   6B 00  LDV.B.00   Set output position to 00
 30   1D 12 0E 0E 17 00  HELLO
 ```

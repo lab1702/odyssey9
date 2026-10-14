@@ -72,6 +72,7 @@ func TestBranches(t *testing.T) {
 		taken bool
 	}{
 		{"BDB after 00 - 1 = 99", []string{"CLR", "DEC", "BDB.20"}, true},
+		{"BDB after 03 - 05 = 98", []string{"LDV.0.03", "LDV.1.05", "LDA.1", "SUB.0", "BDB.20"}, true},
 		{"BDB with 90", []string{"LDV.0.90", "LDA.0", "BDB.20"}, true},
 		{"BDB with 89", []string{"LDV.0.89", "LDA.0", "BDB.20"}, false},
 		{"BDC after 5 + 7 = 12", []string{"LDV.0.05", "LDA.0", "LDV.1.07", "ADD.1", "BDC.20"}, true},
@@ -273,5 +274,32 @@ func TestRandomProgramsRoundTrip(t *testing.T) {
 		if err != nil || *p != mem {
 			t.Fatalf("program %d didn't round-trip (%v):\n%s", i, err, sb.String())
 		}
+	}
+}
+
+// UNP and PAK on register F use register 0 as the next register.
+func TestPackUnpackWrapToRegister0(t *testing.T) {
+	m := assembled(t, nil, "LDV.0.47", "LDA.0", "UNP.F", "CLR", "PAK.F", "HLT")
+	runToHalt(t, m)
+	if m.R[0xF] != 0x04 || m.R[0] != 0x07 || m.A != 0x47 {
+		t.Errorf("UNP.F then PAK.F of 47: RF=%02X R0=%02X A=%02X", m.R[0xF], m.R[0], m.A)
+	}
+}
+
+// GTS saves the step after it, RET returns there, and Display shows the
+// subroutine counter and the accumulator.
+func TestSubroutineReturnAndDisplay(t *testing.T) {
+	m := assembled(t, map[int]string{20: "LDV.0.39", 22: "LDA.0", 23: "RET"}, "GTS.20", "HLT")
+	runToHalt(t, m)
+	if m.S != 2 || m.PC != 2 || m.A != 0x39 {
+		t.Fatalf("after GTS.20 and RET: S=%02d PC=%02d A=%02X", m.S, m.PC, m.A)
+	}
+	press(m, KeyD, KeyS)
+	if got := m.Status(); got != "SUBR CNTR  02" {
+		t.Errorf("Display S: %q", got)
+	}
+	press(m, KeyX)
+	if got := m.Status(); got != "ACCUM  39" {
+		t.Errorf("Display X: %q", got)
 	}
 }

@@ -326,3 +326,20 @@ func TestMonitorWindowWidth(t *testing.T) {
 		}
 	}
 }
+
+// The picture must never come out larger than the window, which would make
+// the whole frame be scaled down and blur.
+func TestScreenFitsWindow(t *testing.T) {
+	for _, dsf := range []float64{1, 2} {
+		for _, lw := range []float64{baseW, baseW + monitorW} {
+			for ow := 400; ow <= 2600; ow += 7 {
+				for oh := 400; oh <= 2600; oh += 3 {
+					w, h, _ := screenSize(lw, float64(ow), float64(oh), dsf)
+					if w > float64(ow)*dsf || h > float64(oh)*dsf {
+						t.Fatalf("window %d×%d at scale %g: picture %g×%g", ow, oh, dsf, w, h)
+					}
+				}
+			}
+		}
+	}
+}

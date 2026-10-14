@@ -18,6 +18,11 @@ const sampleRate = 48000
 // machine's current sound.
 type tone struct {
 	sound atomic.Int32
+	// The time the sound ends, in Unix nanoseconds. It ends then even if the
+	// game loop is held up, as on Windows while the window is dragged, and
+	// so can't stop it.
+	until atomic.Int64
+	left  int           // samples until the sound ends, from the last refresh
 	cur   machine.Sound // the waveform being generated
 	t     float64       // seconds since start
 	start float64       // value of t when cur began
@@ -33,6 +38,7 @@ type tone struct {
 }
 
 func (s *tone) Read(p []byte) (int, error) {
+	s.refresh(time.Now())
 	n := len(p) / 4 * 4
 	for i := 0; i < n; i += 4 {
 		v := s.sample()
@@ -60,6 +66,11 @@ func (s *tone) sample() float64 {
 	// When the sound stops or changes, keep the old waveform going while its
 	// volume fades out, so the output never jumps (which would click).
 	next := machine.Sound(s.sound.Load())
+	if s.left > 0 {
+		s.left--
+	} else {
+		next = machine.SoundNone
+	}
 	fading := false
 	if next != s.cur {
 		if s.vol > 0.001 {
@@ -128,8 +139,16 @@ func newAudio(enabled bool) *tone {
 	return t
 }
 
-func (s *tone) set(snd machine.Sound) {
+// set starts sound snd, to play for d unless set again.
+func (s *tone) set(snd machine.Sound, d time.Duration) {
 	if s != nil {
+		s.until.Store(time.Now().Add(d).UnixNano())
 		s.sound.Store(int32(snd))
 	}
+}
+
+// refresh counts the samples left until the sound ends, from time now.
+func (s *tone) refresh(now time.Time) {
+	d := time.Duration(s.until.Load() - now.UnixNano())
+	s.left = int(max(d, 0).Seconds() * sampleRate)
 }

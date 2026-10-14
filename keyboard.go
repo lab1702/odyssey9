@@ -119,6 +119,9 @@ func drawKeyboard(c canvas) {
 func (g *game) drawLitKeys(c canvas) {
 	for _, k := range keyCaps {
 		if g.keyLit[k.key] > 0 {
+			// Cover the idle key first: its antialiased corners would show
+			// round the lit one's.
+			c.rect(k.x-1, k.y-1, k.w+2, k.h+2, colPanel)
 			k.draw(c, true)
 		}
 	}

@@ -87,12 +87,14 @@ func (g *game) save() {
 // replaced by renaming, such as in a folder where no temporary file can be
 // made, is rewritten in place instead, so that it stays the same file.
 func writeFileAtomic(name string, data []byte) error {
-	name = followLinks(name)
 	fi, err := os.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return writeFile(name, data, os.O_CREATE|os.O_EXCL)
+		return writeNewFile(name, data)
 	}
 	if err != nil {
+		return err
+	}
+	if name, err = filepath.EvalSymlinks(name); err != nil {
 		return err
 	}
 	// Renaming over a file only needs the folder to be writable, so check
@@ -101,14 +103,22 @@ func writeFileAtomic(name string, data []byte) error {
 		return err
 	}
 	if !replaceable(fi) {
-		return writeFile(name, data, os.O_TRUNC)
+		return writeInPlace(name, data)
 	}
 	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
 	if errors.Is(err, fs.ErrPermission) {
-		return writeFile(name, data, os.O_TRUNC)
+		return writeInPlace(name, data)
 	}
 	if err != nil {
 		return err
+	}
+	// A new file may not get the old one's group, such as in a folder
+	// whose files take its group. If it can't be given it, the rename would
+	// change who can read the file.
+	if !sameGroup(f, fi) {
+		f.Close()
+		os.Remove(f.Name())
+		return writeInPlace(name, data)
 	}
 	_, err = f.Write(data)
 	if err == nil {
@@ -124,13 +134,49 @@ func writeFileAtomic(name string, data []byte) error {
 		err = os.Rename(f.Name(), name)
 		if errors.Is(err, fs.ErrPermission) {
 			os.Remove(f.Name())
-			return writeFile(name, data, os.O_TRUNC)
+			return writeInPlace(name, data)
 		}
 	}
 	if err != nil {
 		os.Remove(f.Name())
+		return err
 	}
-	return err
+	syncDir(filepath.Dir(name))
+	return nil
+}
+
+// writeNewFile creates name, which doesn't exist yet. If name is a symlink
+// to a missing file, the system creates the file it points to, so it ends
+// up where the link leads however the link's path is written.
+func writeNewFile(name string, data []byte) error {
+	flag := os.O_CREATE | os.O_EXCL
+	link := false
+	if fi, err := os.Lstat(name); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		// O_EXCL would refuse to follow the link.
+		flag, link = os.O_CREATE|os.O_TRUNC, true
+	}
+	f, err := os.OpenFile(name, os.O_WRONLY|flag, 0o666)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		// Don't leave part of a program to be loaded later.
+		if !link {
+			os.Remove(name)
+		}
+		return err
+	}
+	if real, err := filepath.EvalSymlinks(name); err == nil {
+		syncDir(filepath.Dir(real))
+	}
+	return nil
 }
 
 // checkWritable returns the error from opening an existing file for
@@ -143,45 +189,34 @@ func checkWritable(name string) error {
 	return f.Close()
 }
 
-// writeFile writes data to name, opened with the extra flags.
-func writeFile(name string, data []byte, flag int) error {
-	f, err := os.OpenFile(name, os.O_WRONLY|flag, 0o666)
+// writeInPlace rewrites the existing file name with data, keeping it the
+// same file. Rather than truncating the file first, it writes over the old
+// contents, and if that fails, such as when the disk is full, it puts them
+// back, so the old program isn't lost. The old contents' space is still
+// the file's, so putting them back needs no more.
+func writeInPlace(name string, data []byte) error {
+	old, rerr := os.ReadFile(name)
+	f, err := os.OpenFile(name, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
+	_, err = f.WriteAt(data, 0)
+	if err == nil {
+		err = f.Truncate(int64(len(data)))
+	}
 	if err == nil {
 		err = f.Sync()
+	}
+	if err != nil && rerr == nil {
+		if _, werr := f.WriteAt(old, 0); werr == nil {
+			f.Truncate(int64(len(old)))
+			f.Sync()
+		}
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	return err
-}
-
-// followLinks returns the file that name refers to, following symlinks even
-// when the file they point to doesn't exist yet.
-func followLinks(name string) string {
-	if target, err := filepath.EvalSymlinks(name); err == nil {
-		return target
-	}
-	for range 40 { // a limit, in case the links form a loop
-		target, err := os.Readlink(name)
-		if err != nil {
-			break
-		}
-		if !filepath.IsAbs(target) {
-			// Resolve the link's folder first, as the system does: a ".."
-			// in target leaves the real folder, not the path to a link.
-			dir := filepath.Dir(name)
-			if d, err := filepath.EvalSymlinks(dir); err == nil {
-				dir = d
-			}
-			target = filepath.Join(dir, target)
-		}
-		name = target
-	}
-	return name
 }
 
 // maxListing is the largest file read as a listing. A full program with
@@ -206,15 +241,30 @@ func readListing(f fs.File, err error) ([]byte, error) {
 }
 
 // saveRecovery writes the program to a new file next to the program file,
-// for when the emulator stops on an error, and returns the file's name.
+// or in the temporary folder if it can't go there, for when the emulator
+// stops on an error, and returns the file's name.
 func (g *game) saveRecovery() (string, error) {
 	var buf bytes.Buffer
 	machine.FormatProgram(&buf, "Recovered "+time.Now().Format("2006-01-02 15:04"), &g.m.Mem)
-	f, err := os.CreateTemp(filepath.Dir(g.file), "odyssey9-recovered-*.txt")
+	name, err := writeRecovery(filepath.Dir(g.file), buf.Bytes())
+	if err != nil {
+		if tmp, terr := writeRecovery(os.TempDir(), buf.Bytes()); terr == nil {
+			return tmp, nil
+		}
+	}
+	return name, err
+}
+
+// writeRecovery writes data to a new recovery file in dir.
+func writeRecovery(dir string, data []byte) (string, error) {
+	f, err := os.CreateTemp(dir, "odyssey9-recovered-*.txt")
 	if err != nil {
 		return "", err
 	}
-	_, err = f.Write(buf.Bytes())
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

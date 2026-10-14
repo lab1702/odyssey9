@@ -252,7 +252,7 @@ func (g *betweenSheets) key(m *Machine, k Key) {
 		m.play(SoundChirp, 300*time.Millisecond)
 	} else {
 		g.pause = 1500 * time.Millisecond
-		m.play(SoundBeeps, 600*time.Millisecond)
+		m.play(SoundBeeps, 300*time.Millisecond) // "a couple of BEEPS"
 	}
 }
 

@@ -179,6 +179,12 @@ func (m *Machine) CurrentSound() Sound {
 	return SoundNone
 }
 
+// SoundLeft returns how much longer the current sound plays, if nothing
+// else happens.
+func (m *Machine) SoundLeft() time.Duration {
+	return max(m.soundLeft, 0)
+}
+
 func (m *Machine) play(s Sound, d time.Duration) {
 	m.sound, m.soundLeft = s, d
 }

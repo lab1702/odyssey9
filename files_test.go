@@ -254,3 +254,60 @@ func TestSaveRefusesReadOnlyFile(t *testing.T) {
 		t.Errorf("read-only file was replaced:\n%s", got)
 	}
 }
+
+// The system follows a link's ".." from wherever the links before it lead,
+// so SAVE must create the file there, where LOAD will look for it.
+func TestSaveThroughDanglingSymlinkPastLinkedFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "deep", "a", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("deep", "a", "b"), filepath.Join(root, "sub")); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	file := filepath.Join(root, "prog.txt")
+	// Not filepath.Join, which would drop "sub/..".
+	sep := string(filepath.Separator)
+	if err := os.Symlink("sub"+sep+".."+sep+"out.txt", file); err != nil {
+		t.Fatal(err)
+	}
+	g := newGame(machine.New(), file, false)
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if _, err := os.Stat(filepath.Join(root, "out.txt")); err == nil {
+		t.Error("SAVE wrote to the wrong folder")
+	}
+	if p, err := machine.ParseProgram(strings.NewReader(mustRead(t, filepath.Join(root, "deep", "a", "out.txt")))); err != nil || p[0] != 0x08 {
+		t.Fatalf("SAVE didn't create the link's target: %v", err)
+	}
+}
+
+func TestRecoveryInReadOnlyFolder(t *testing.T) {
+	g := testGame(t)
+	typeStep(g, machine.Key0, machine.Key8)
+	dir := filepath.Dir(g.file)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	if f, err := os.CreateTemp(dir, "probe"); err == nil {
+		f.Close()
+		os.Remove(f.Name())
+		t.Skip("folder still writable (running as root?)")
+	}
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
+	name, err := g.saveRecovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(name) != tmp {
+		t.Errorf("recovery file %s not in the temporary folder %s", name, tmp)
+	}
+	p, err := machine.ParseProgram(strings.NewReader(mustRead(t, name)))
+	if err != nil || *p != g.m.Mem {
+		t.Errorf("recovery file doesn't hold the program: %v", err)
+	}
+}

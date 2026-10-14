@@ -135,6 +135,17 @@ func TestInstructionAtStep99(t *testing.T) {
 	}
 }
 
+// Disassemble takes any step number, counting round from 00 to 99.
+func TestDisassembleWrapsStep(t *testing.T) {
+	var mem [Steps]byte
+	mem[99] = opCLR
+	for _, step := range []int{99, -1, 199} {
+		if s, n := Disassemble(&mem, step); s != "CLR" || n != 1 {
+			t.Errorf("Disassemble at step %d: %q, %d steps", step, s, n)
+		}
+	}
+}
+
 // A branch target byte that isn't a step number is shown with the step it
 // really goes to, and the listing still loads back byte for byte.
 func TestDisassembleBadTarget(t *testing.T) {
@@ -379,6 +390,23 @@ func TestHexEntryAndRoll(t *testing.T) {
 	m.Press(KeyD)
 	if got := m.Status(); got != "ROLL 03  00" {
 		t.Errorf("roll status %q", got)
+	}
+}
+
+// Entering step 99 moves on to step 00, and Roll wraps both ways.
+func TestEditingWrapsAtStep99(t *testing.T) {
+	m := New()
+	press(m, KeyReset, KeyP, KeyM, KeyR, KeyD)
+	if got := m.Status(); got != "ROLL 99  00" {
+		t.Errorf("Roll down from step 00: %q", got)
+	}
+	press(m, KeyClear, KeyM, KeyI, KeyF, KeyF, KeyEnter)
+	if m.Mem[99] != 0xFF || m.editStep != 0 {
+		t.Errorf("hex entry at step 99: step 99 = %02X, next step %02d", m.Mem[99], m.editStep)
+	}
+	press(m, KeyClear, KeyR, KeyD, KeyU)
+	if got := m.Status(); got != "ROLL 00  00" {
+		t.Errorf("Roll up from step 99: %q", got)
 	}
 }
 

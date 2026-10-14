@@ -144,13 +144,23 @@ func (g *game) LayoutF(outsideW, outsideH float64) (float64, float64) {
 		g.width = g.logicalW()
 	}
 	g.outsideW = outsideW
-	lw := float64(g.width)
-	s := math.Min(outsideW/lw, outsideH/baseH) * dsf
+	w, h, s := screenSize(float64(g.width), outsideW, outsideH, dsf)
+	g.scale = float32(s)
+	return w, h
+}
+
+// screenSize returns the size in device pixels of a picture lw logical
+// pixels wide, scaled to fit a window, and the scale.
+func screenSize(lw, outsideW, outsideH, dsf float64) (w, h, s float64) {
+	s = math.Min(outsideW/lw, outsideH/baseH) * dsf
 	if s <= 0 {
 		s = 1
 	}
-	g.scale = float32(s)
-	return math.Ceil(lw * s), math.Ceil(baseH * s)
+	// A side that fills the window can come out a hair over its size, such
+	// as 443.00000000000006, which mustn't round up: a picture 1 px larger
+	// than the window is scaled down to fit and blurs.
+	const slack = 1e-6
+	return math.Ceil(lw*s - slack), math.Ceil(baseH*s - slack), s
 }
 
 func (g *game) showToast(s string) {
@@ -229,7 +239,7 @@ func (g *game) deliver(k machine.Key) {
 // runConsole passes the queued keys to the console and runs it for dt.
 func (g *game) runConsole(dt time.Duration) {
 	if !g.power {
-		g.snd.set(machine.SoundNone)
+		g.snd.set(machine.SoundNone, 0)
 		return
 	}
 	// Keys left waiting for a program are dropped once it has stopped, or
@@ -240,7 +250,7 @@ func (g *game) runConsole(dt time.Duration) {
 	g.deliverKeys()
 	g.held = len(g.keys)
 	g.m.Update(dt)
-	g.snd.set(g.m.CurrentSound())
+	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft())
 }
 
 // closeWindow reports whether the window may close: when it would lose an

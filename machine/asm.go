@@ -135,7 +135,7 @@ func decode(op byte) (opInfo, bool) {
 // render as "??", followed by the letter when the byte is a letter's
 // character code (message data).
 func Disassemble(mem *[Steps]byte, step int) (string, int) {
-	step %= Steps
+	step = (step%Steps + Steps) % Steps
 	op := mem[step]
 	o, ok := decode(op)
 	if !ok {
