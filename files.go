@@ -106,12 +106,11 @@ func writeFileAtomic(name string, data []byte) error {
 	if !replaceable(name, fi) {
 		return writeInPlace(name, data)
 	}
-	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
-	if errors.Is(err, fs.ErrPermission) {
-		return writeInPlace(name, data)
-	}
+	// If no temporary file can be made, such as in a folder that isn't
+	// writable, the file is rewritten in place.
+	f, err := os.CreateTemp(filepath.Dir(name), tempPattern)
 	if err != nil {
-		return err
+		return writeInPlace(name, data)
 	}
 	// A new file may not get the old one's group, such as in a folder
 	// whose files take its group. If it can't be given it, the rename would
@@ -142,26 +141,33 @@ func writeFileAtomic(name string, data []byte) error {
 		return writeInPlace(name, data)
 	}
 	syncDir(filepath.Dir(name))
-	removeStale(filepath.Dir(name), filepath.Base(name))
+	removeStale(filepath.Dir(name))
 	return nil
 }
 
 // rename is os.Rename, replaced in tests to make it fail.
 var rename = os.Rename
 
+// tempPattern names the temporary files saves make, for CreateTemp. It is
+// short, so that a file whose name is as long as the system allows can
+// still be saved, and the emulator's own, so that removeStale removes no
+// one else's files.
+const tempPattern = ".odyssey9-save-*.tmp"
+
 // staleAge is how old a temporary file left by an earlier save must be
 // before a save removes it. A younger one could belong to a save still
 // being made by another copy of the emulator.
 const staleAge = time.Hour
 
-// removeStale removes old temporary files left in dir by saves of the
-// file base that were stopped, such as by a power cut, before they renamed
-// them. CreateTemp names them base.<digits>.tmp.
-func removeStale(dir, base string) {
+// removeStale removes old temporary files left in dir by saves that were
+// stopped, such as by a power cut, before they renamed them. CreateTemp
+// puts digits in place of tempPattern's *.
+func removeStale(dir string) {
+	prefix, suffix, _ := strings.Cut(tempPattern, "*")
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		mid, pre := strings.CutPrefix(e.Name(), base+".")
-		mid, suf := strings.CutSuffix(mid, ".tmp")
+		mid, pre := strings.CutPrefix(e.Name(), prefix)
+		mid, suf := strings.CutSuffix(mid, suffix)
 		if !pre || !suf || mid == "" || strings.Trim(mid, "0123456789") != "" {
 			continue
 		}
@@ -183,7 +189,7 @@ func writeNewFile(name string, data []byte) error {
 		// O_EXCL would refuse to follow the link.
 		flag, link = os.O_CREATE|os.O_TRUNC, true
 	}
-	f, err := os.OpenFile(name, os.O_WRONLY|flag, 0o666)
+	f, err := openPlain(name, os.O_WRONLY|flag, 0o666)
 	if err != nil {
 		return err
 	}
@@ -195,9 +201,13 @@ func writeNewFile(name string, data []byte) error {
 		err = cerr
 	}
 	if err != nil {
-		// Don't leave part of a program to be loaded later.
+		// Don't leave part of a program to be loaded later. Through a
+		// symlink, the file to remove is the one it points to, made just
+		// now; the link stays.
 		if !link {
 			os.Remove(name)
+		} else if real, rerr := filepath.EvalSymlinks(name); rerr == nil {
+			os.Remove(real)
 		}
 		return err
 	}
@@ -214,16 +224,42 @@ var errSpecialFile = errors.New("this is not a plain file")
 // checkWritable returns the error from opening an existing file for
 // writing, if any.
 func checkWritable(name string) error {
-	if fi, err := os.Stat(name); err == nil {
-		if err := checkPlain(fi); err != nil {
-			return err
-		}
-	}
-	f, err := os.OpenFile(name, os.O_WRONLY, 0)
+	f, err := openPlain(name, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
 	return f.Close()
+}
+
+// openPlain opens the file name as os.OpenFile does, refusing a folder or a
+// special file. It checks the file before opening it, and again after (see
+// openChecked), in case it was replaced meanwhile.
+func openPlain(name string, flag int, perm fs.FileMode) (*os.File, error) {
+	if fi, err := os.Stat(name); err == nil {
+		if err := checkPlain(fi); err != nil {
+			return nil, err
+		}
+	}
+	return openChecked(name, flag, perm)
+}
+
+// openChecked opens the file name as os.OpenFile does, then refuses it if
+// it is a folder or a special file. Opening it with nonblock means a pipe
+// doesn't wait for another program to open its other end.
+func openChecked(name string, flag int, perm fs.FileMode) (*os.File, error) {
+	f, err := os.OpenFile(name, flag|nonblock, perm)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err == nil {
+		err = checkPlain(fi)
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // writeInPlace rewrites the existing file name with data, keeping it the
@@ -232,8 +268,13 @@ func checkWritable(name string) error {
 // back, so the old program isn't lost. The old contents' space is still
 // the file's, so putting them back needs no more.
 func writeInPlace(name string, data []byte) error {
-	old, rerr := os.ReadFile(name)
-	f, err := os.OpenFile(name, os.O_WRONLY, 0)
+	var old []byte
+	r, rerr := openPlain(name, os.O_RDONLY, 0)
+	if rerr == nil {
+		old, rerr = io.ReadAll(r)
+		r.Close()
+	}
+	f, err := openPlain(name, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
@@ -276,14 +317,11 @@ func checkPlain(fi fs.FileInfo) error {
 
 // openListing opens the listing file name, refusing one checkPlain does.
 func openListing(name string) (fs.File, error) {
-	fi, err := os.Stat(name)
-	if err == nil {
-		err = checkPlain(fi)
-	}
+	f, err := openPlain(name, os.O_RDONLY, 0)
 	if err != nil {
-		return nil, err
+		return nil, err // not a nil *os.File in an fs.File
 	}
-	return os.Open(name)
+	return f, nil
 }
 
 // readListing reads a listing file opened with openListing or checked with

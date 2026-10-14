@@ -75,5 +75,8 @@ func TestParseProgramUTF16(t *testing.T) {
 		if err != nil || p[0] != 0x60 || p[1] != 0x05 || p[2] != 0xFF {
 			t.Errorf("%s: %v", name, err)
 		}
+		if _, err := ParseProgram(bytes.NewReader(b[:len(b)-3])); err == nil {
+			t.Errorf("%s: a file cut part-way through a character was accepted", name)
+		}
 	}
 }

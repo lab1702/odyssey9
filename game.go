@@ -67,6 +67,8 @@ type game struct {
 	outsideW float64 // window width at the last Layout
 	resizeOf float64 // window width when MONITOR asked for a new size
 	resizeIn int     // ticks left to wait for that new size
+	preMon   [2]int  // window size before MONITOR opened the panel
+	monSize  [2]int  // the size it was given then (see flipMonitor)
 	colors   bool    // colour characters like the manual's symbol chart
 	overlay  panel   // drawn over the window
 	toast    string
@@ -206,6 +208,9 @@ func (g *game) press(k machine.Key) {
 		g.keys = append(g.keys, k)
 	} else if k == machine.KeyReset {
 		g.keys[len(g.keys)-1] = k
+		// The key it replaces may have been left waiting for a program, to
+		// be dropped if the program has stopped, but RESET mustn't be.
+		g.held = min(g.held, len(g.keys)-1)
 	}
 }
 
@@ -248,7 +253,7 @@ func (g *game) deliver(k machine.Key) {
 // runConsole passes the queued keys to the console and runs it for dt.
 func (g *game) runConsole(dt time.Duration) {
 	if !g.power {
-		g.snd.set(machine.SoundNone, 0, true)
+		g.followSound() // POWER stopped any sound
 		return
 	}
 	// Keys left waiting for a program are dropped once it has stopped, or
@@ -259,11 +264,15 @@ func (g *game) runConsole(dt time.Duration) {
 	g.deliverKeys()
 	g.held = len(g.keys)
 	// A key's beep starts now, before Update counts this tick off it, and
-	// a sound RESET stopped stops now. A sound that ends during Update is
-	// left to the stream to end, at its own time.
-	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft(), true)
+	// a sound RESET stopped stops now.
+	g.followSound()
 	g.m.Update(dt)
-	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft(), false)
+	g.followSound()
+}
+
+// followSound passes the machine's sound to the stream.
+func (g *game) followSound() {
+	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft(), g.m.SoundSeq())
 }
 
 // closeWindow reports whether the window may close: when it would lose an
@@ -326,12 +335,11 @@ func (g *game) toggleOverlay(p panel) {
 
 func (g *game) toggleMonitor() {
 	ww, wh := ebiten.WindowSize()
-	g.monitor = !g.monitor
 	mw := 0
 	if mon := ebiten.Monitor(); mon != nil {
 		mw, _ = mon.Size()
 	}
-	w := monitorWindowWidth(ww, wh, g.width, g.logicalW(), mw)
+	w := g.flipMonitor(ww, wh, mw)
 	if w != ww {
 		ebiten.SetWindowSize(w, wh)
 	}
@@ -344,18 +352,42 @@ func (g *game) toggleMonitor() {
 	}
 }
 
+// flipMonitor opens or closes the monitor panel in a window of ww by wh,
+// on a monitor mw wide (0 if unknown), and returns the window width to use.
+// Closing it gives the window back the width it had before it was opened,
+// if its size hasn't changed since, as opening it can have made the
+// picture smaller to fit the monitor.
+func (g *game) flipMonitor(ww, wh, mw int) int {
+	// The window is sized for the width before this change, though g.width
+	// may still be waiting for the last change's resize.
+	oldW := g.logicalW()
+	g.monitor = !g.monitor
+	if !g.monitor {
+		before, after := g.preMon, g.monSize
+		g.preMon, g.monSize = [2]int{}, [2]int{}
+		if after != [2]int{} && after == [2]int{ww, wh} {
+			return before[0]
+		}
+		return monitorWindowWidth(ww, wh, oldW, g.logicalW(), mw)
+	}
+	w := monitorWindowWidth(ww, wh, oldW, g.logicalW(), mw)
+	g.preMon, g.monSize = [2]int{ww, wh}, [2]int{w, wh}
+	return w
+}
+
 // monitorWindowWidth returns the window width to use when the logical width
 // changes from oldW to newW in a window of ww by wh, keeping the picture's
 // scale. The window grows only as far as the wider picture needs, and no
-// wider than the monitor's width mw (0 if unknown), and shrinks only if the
-// picture filled its width, so a window with room to spare keeps its size.
+// wider than nearly the monitor's width mw (0 if unknown), leaving room for
+// the window's frame. It shrinks only if the picture filled its width, so a
+// window with room to spare keeps its size.
 func monitorWindowWidth(ww, wh int, oldW, newW float32, mw int) int {
 	fits := float64(ww)/float64(oldW) <= float64(wh)/baseH // picture fills the width
 	s := math.Min(float64(ww)/float64(oldW), float64(wh)/baseH)
 	want := int(math.Round(float64(newW) * s))
 	if newW > oldW {
 		if mw > 0 {
-			want = min(want, mw)
+			want = min(want, int(float64(mw)*0.95)) // as fitWindow
 		}
 		return max(ww, want)
 	}

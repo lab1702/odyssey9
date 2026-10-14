@@ -28,7 +28,11 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	text := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(decodeText(data))
+	text, err := decodeText(data)
+	if err != nil {
+		return nil, err
+	}
+	text = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(text)
 	var setOn [Steps]int // the line that gave each step, or 0
 	lineNo, count := 0, 0
 	for line := range strings.SplitSeq(text, "\n") {
@@ -116,8 +120,9 @@ func FormatProgram(w io.Writer, title string, mem *[Steps]byte) error {
 }
 
 // decodeText returns data as a string, decoding it from UTF-16 if it starts
-// with a UTF-16 byte order mark, which it drops.
-func decodeText(data []byte) string {
+// with a UTF-16 byte order mark, which it drops. A UTF-16 file with an odd
+// number of bytes has lost the end of its last character, and perhaps more.
+func decodeText(data []byte) (string, error) {
 	var get func(b []byte) uint16
 	switch {
 	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE:
@@ -125,11 +130,14 @@ func decodeText(data []byte) string {
 	case len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF:
 		get = func(b []byte) uint16 { return uint16(b[0])<<8 | uint16(b[1]) }
 	default:
-		return string(data)
+		return string(data), nil
+	}
+	if len(data)%2 != 0 {
+		return "", fmt.Errorf("this UTF-16 file ends part-way through a character")
 	}
 	u := make([]uint16, 0, len(data)/2)
 	for i := 2; i+1 < len(data); i += 2 {
 		u = append(u, get(data[i:]))
 	}
-	return string(utf16.Decode(u))
+	return string(utf16.Decode(u)), nil
 }

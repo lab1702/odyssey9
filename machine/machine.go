@@ -115,6 +115,7 @@ type Machine struct {
 	// sound
 	sound     Sound
 	soundLeft time.Duration
+	soundSeq  uint64 // counts sounds played and stopped early (see SoundSeq)
 
 	game game
 	rng  *rand.Rand
@@ -148,7 +149,7 @@ func (m *Machine) PowerOn() {
 	m.blockLeft = 0
 	m.game = nil
 	m.note = ""
-	m.sound, m.soundLeft = SoundNone, 0
+	m.stopSound()
 }
 
 // Mode returns the current operating mode.
@@ -185,8 +186,20 @@ func (m *Machine) SoundLeft() time.Duration {
 	return max(m.soundLeft, 0)
 }
 
+// SoundSeq returns a number that changes whenever a sound is played, even
+// the same one again, and whenever one is stopped early, as by RESET, but
+// not when a sound ends on its own.
+func (m *Machine) SoundSeq() uint64 { return m.soundSeq }
+
 func (m *Machine) play(s Sound, d time.Duration) {
 	m.sound, m.soundLeft = s, d
+	m.soundSeq++
+}
+
+// stopSound stops the current sound, if any, before its end.
+func (m *Machine) stopSound() {
+	m.sound, m.soundLeft = SoundNone, 0
+	m.soundSeq++
 }
 
 func (m *Machine) clearScreen() {
@@ -328,7 +341,7 @@ func (m *Machine) reset() {
 	}
 	m.waitReg = notWaiting
 	m.blockLeft = 0
-	m.sound, m.soundLeft = SoundNone, 0
+	m.stopSound()
 	m.inBuf = nil
 	if m.mode == ModeGame || m.mode == ModeSelect {
 		m.clearScreen()

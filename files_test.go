@@ -328,31 +328,33 @@ func TestSaveWhenRenameFails(t *testing.T) {
 	if p, err := machine.ParseProgram(strings.NewReader(mustRead(t, g.file))); err != nil || p[0] != 0x08 {
 		t.Errorf("SAVE didn't write the file: %v", err)
 	}
-	if tmp, _ := filepath.Glob(g.file + ".*.tmp"); len(tmp) > 0 {
+	if tmp, _ := filepath.Glob(filepath.Join(filepath.Dir(g.file), tempPattern)); len(tmp) > 0 {
 		t.Errorf("SAVE left %v", tmp)
 	}
 }
 
-// SAVE removes temporary files that earlier saves of the same file left
-// behind, once they are old, and nothing else.
+// SAVE removes temporary files that earlier saves left behind, once they
+// are old, and nothing else, even files named the way some other programs
+// name theirs.
 func TestSaveRemovesStaleTempFiles(t *testing.T) {
 	g := testGame(t)
 	dir := filepath.Dir(g.file)
 	old := time.Now().Add(-2 * staleAge)
 	files := map[string]bool{ // name: whether SAVE should remove it
-		"prog.txt.123456.tmp": true,
-		"prog.txt.789.tmp":    false, // too new: perhaps a save being made
-		"prog.txt.abc.tmp":    false,
-		"other.txt.123.tmp":   false,
-		"123.tmp":             false,
-		"prog.txt.tmp":        false,
+		".odyssey9-save-123456.tmp": true,
+		".odyssey9-save-789.tmp":    false, // too new: perhaps a save being made
+		".odyssey9-save-abc.tmp":    false,
+		".odyssey9-save-.tmp":       false,
+		"odyssey9-save-123.tmp":     false,
+		"prog.txt.123456.tmp":       false,
+		"123.tmp":                   false,
 	}
 	for name := range files {
 		n := filepath.Join(dir, name)
 		if err := os.WriteFile(n, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if name != "prog.txt.789.tmp" {
+		if name != ".odyssey9-save-789.tmp" {
 			if err := os.Chtimes(n, old, old); err != nil {
 				t.Fatal(err)
 			}
@@ -368,5 +370,20 @@ func TestSaveRemovesStaleTempFiles(t *testing.T) {
 		if exists := err == nil; exists == gone {
 			t.Errorf("%s: exists %v after SAVE", name, exists)
 		}
+	}
+}
+
+// SAVE works over a file whose name is as long as the system allows, too
+// long to add anything to for a temporary file's name.
+func TestSaveLongName(t *testing.T) {
+	g := testGame(t)
+	g.file = filepath.Join(filepath.Dir(g.file), strings.Repeat("p", 251)+".txt")
+	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
+		t.Skip("no file names that long:", err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if p, err := machine.ParseProgram(strings.NewReader(mustRead(t, g.file))); err != nil || p[0] != 0x08 {
+		t.Errorf("SAVE didn't write the file: %v", err)
 	}
 }

@@ -101,6 +101,33 @@ func TestRunningProgramGetsEveryKey(t *testing.T) {
 
 // Keys left waiting for a program when the power goes off don't count
 // against the first key typed after it comes back on.
+// RESET pressed when the queue is full is passed on even if the program
+// has just stopped, which drops the keys left waiting for it.
+func TestResetWithFullQueue(t *testing.T) {
+	g := testGame(t)
+	g.m.SetSpeed(0)
+	g.m.LoadProgram(&[machine.Steps]byte{0x00, 0xFF}) // a step, then HLT
+	g.press(machine.KeyE)
+	tick(g)
+	for range maxQueued {
+		g.press(machine.KeyX)
+	}
+	for i := 0; g.m.Mode() == machine.ModeExecute; i++ {
+		if i > 600 {
+			t.Fatal("program didn't stop")
+		}
+		tick(g)
+	}
+	if len(g.keys) != maxQueued {
+		t.Fatalf("%d keys waiting, want %d", len(g.keys), maxQueued)
+	}
+	g.press(machine.KeyReset)
+	tick(g)
+	if got := g.m.Status(); got != "COMMAND" {
+		t.Errorf("status %q after RESET, want COMMAND", got)
+	}
+}
+
 func TestPowerOffDropsWaitingKeys(t *testing.T) {
 	g := testGame(t)
 	g.m.LoadProgram(&[machine.Steps]byte{0x12, 0x00}) // GTO.00
@@ -172,7 +199,7 @@ func TestSaveAsksBeforeReplacingAnotherProgram(t *testing.T) {
 	if err != nil || p[0] != 0x09 {
 		t.Fatalf("second SAVE didn't write the program: %v", err)
 	}
-	if left, _ := filepath.Glob(g.file + ".*.tmp"); len(left) > 0 {
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(g.file), tempPattern)); len(left) > 0 {
 		t.Errorf("temporary files left behind: %v", left)
 	}
 }
@@ -321,13 +348,44 @@ func TestMonitorWindowWidth(t *testing.T) {
 		{"close in a wide window", 2000, baseH, open, baseW, 0, 2000},
 		{"open in a slightly wide window", 1000, baseH, baseW, open, 0, open},
 		{"open on a wide monitor", baseW, baseH, baseW, open, 1920, open},
-		{"open on a narrow monitor", baseW, baseH, baseW, open, 1000, 1000},
+		{"open on a narrow monitor", baseW, baseH, baseW, open, 1000, 950},
 		{"open in a window wider than the monitor", 1200, baseH, baseW, open, 1000, 1200},
 	}
 	for _, c := range cases {
 		if got := monitorWindowWidth(c.ww, c.wh, c.oldW, c.newW, c.mw); got != c.want {
 			t.Errorf("%s: width %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// Closing the monitor gives the window back its width from before it was
+// opened, unless the user has resized it since, and toggling it twice before
+// the window has resized leaves the window as it was.
+func TestFlipMonitor(t *testing.T) {
+	g := testGame(t)
+	ww, wh := fitWindow(baseW, baseH, 1000, 1600)
+	open := g.flipMonitor(ww, wh, 1000)
+	if open != 950 {
+		t.Errorf("opened at %d, want 950", open)
+	}
+	if w := g.flipMonitor(open, wh, 1000); w != ww {
+		t.Errorf("closed at %d, want %d", w, ww)
+	}
+
+	// Resized by the user while open
+	g.flipMonitor(baseW, baseH, 0)
+	if w := g.flipMonitor(2*(baseW+monitorW), 2*baseH, 0); w != 2*baseW {
+		t.Errorf("closed a resized window at %d, want %d", w, 2*baseW)
+	}
+
+	// Toggled twice before Layout has caught up with the first resize
+	g = testGame(t)
+	if w := g.flipMonitor(baseW, baseH, 0); w != baseW+monitorW {
+		t.Fatalf("opened at %d, want %d", w, baseW+monitorW)
+	}
+	g.monSize = [2]int{} // as if the window manager changed the size it was given
+	if w := g.flipMonitor(baseW+monitorW, baseH, 0); w != baseW {
+		t.Errorf("closed before the resize at %d, want %d", w, baseW)
 	}
 }
 

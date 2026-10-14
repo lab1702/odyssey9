@@ -183,13 +183,14 @@ const (
 )
 
 // pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
-// this tick.
+// this tick. Keys typed with a shortcut modifier held are left to the
+// system, including Backspace, Enter, Delete and Esc, so that a habit such
+// as Cmd+Backspace on a Mac doesn't CLEAR.
 func pollKeyboard() []machine.Key {
-	var chars []rune
-	if !shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
-		chars = ebiten.AppendInputChars(nil)
+	if shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
+		return nil
 	}
-	return hostKeys(chars, inpututil.AppendJustPressedKeys(nil),
+	return hostKeys(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
 		inpututil.KeyPressDuration(ebiten.KeyBackspace))
 }
 

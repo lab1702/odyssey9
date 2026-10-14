@@ -35,3 +35,7 @@ func sameGroup(f *os.File, fi fs.FileInfo) bool { return true }
 // syncDir does nothing: Windows writes a folder's list of files to disk
 // on its own.
 func syncDir(dir string) {}
+
+// nonblock is 0: opening a file on Windows doesn't wait for another
+// program.
+const nonblock = 0

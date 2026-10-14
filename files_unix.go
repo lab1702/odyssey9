@@ -9,16 +9,17 @@ import (
 )
 
 // replaceable reports whether the file name, whose details are fi, can be
-// replaced by a new one without its owner changing: it has no other hard
-// links, and this user owns it. A new file's group is checked once it is
-// made (see sameGroup). A new file doesn't get the old one's extended
-// attributes, such as macOS Finder tags, which aren't checked.
+// replaced by a new one without its owner or who can use it changing: it
+// has no other hard links or access control list, and this user owns it. A
+// new file's group is checked once it is made (see sameGroup). A new file
+// doesn't get the old one's other extended attributes, such as macOS
+// Finder tags, which aren't checked.
 func replaceable(name string, fi fs.FileInfo) bool {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return true
 	}
-	return st.Nlink == 1 && int(st.Uid) == os.Geteuid()
+	return st.Nlink == 1 && int(st.Uid) == os.Geteuid() && !hasACL(name)
 }
 
 // sameGroup gives the new file f the group of the file fi, if it hasn't
@@ -50,3 +51,6 @@ func syncDir(dir string) {
 		d.Close()
 	}
 }
+
+// nonblock is the flag that opens a pipe without waiting for its other end.
+const nonblock = syscall.O_NONBLOCK

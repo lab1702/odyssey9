@@ -19,3 +19,6 @@ func sameGroup(f *os.File, fi fs.FileInfo) bool { return true }
 // syncDir does nothing: only Unix can write a folder's list of files to
 // disk on its own.
 func syncDir(dir string) {}
+
+// nonblock is 0: only Unix has pipes that a name in a folder can open.
+const nonblock = 0

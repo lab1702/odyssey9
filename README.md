@@ -114,6 +114,10 @@ Follow the manual. At power-on the screen says **SELECT GAME**:
 | Esc | RESET |
 | Backspace | erases the last character you typed in Input mode, repeating while held (otherwise CLEAR) |
 
+Keys pressed while Ctrl, Alt or Cmd is held are left to your system as
+shortcuts and don't reach the console. AltGr and the Mac's Option key still
+type characters.
+
 ### Emulator controls
 
 There is a row of buttons under the TV, and each one also has a function key:

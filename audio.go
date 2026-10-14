@@ -22,9 +22,9 @@ type tone struct {
 	// however late the stream picks it up, and ends on time even if the
 	// game loop is held up, as on Windows while the window is dragged.
 	cue atomic.Pointer[cue]
-	// Kept by the game loop, to tell a new sound from one still playing.
-	lastSnd  machine.Sound
-	lastLeft time.Duration
+	// The machine's SoundSeq when the game loop last started a sound, kept
+	// to tell a new sound from one still playing.
+	lastSeq uint64
 
 	seen  *cue          // the cue being played
 	left  int           // samples until it ends
@@ -157,18 +157,16 @@ func newAudio(enabled bool) *tone {
 	return t
 }
 
-// set tells the stream the machine is playing sound snd, with d of it left.
-// It is called every tick: only a different sound, or the same one with
-// more left (played again), starts a new one. The stream times each sound
-// itself, so when the machine's sound ends, the stream's runs to its own
-// end, unless cut is set, as when RESET or POWER stops the sound early.
-func (s *tone) set(snd machine.Sound, d time.Duration, cut bool) {
-	if s == nil {
+// set tells the stream the machine is playing sound snd, with d of it left,
+// and gives the machine's SoundSeq, seq. It is called every tick, but only
+// when seq changes, because a sound was played or stopped early, as by
+// RESET or POWER, does the stream change sound. The stream times each
+// sound itself, so when the machine's sound ends on its own, the stream's
+// runs to its own end.
+func (s *tone) set(snd machine.Sound, d time.Duration, seq uint64) {
+	if s == nil || seq == s.lastSeq {
 		return
 	}
-	isNew := snd != s.lastSnd || d > s.lastLeft
-	s.lastSnd, s.lastLeft = snd, d
-	if isNew && (snd != machine.SoundNone || cut) {
-		s.cue.Store(&cue{snd, d})
-	}
+	s.lastSeq = seq
+	s.cue.Store(&cue{snd, d})
 }
