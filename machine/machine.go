@@ -153,6 +153,7 @@ func (m *Machine) Speed() int { return m.speed }
 func (m *Machine) SetSpeed(i int) {
 	if i >= 0 && i < len(Speeds) {
 		m.speed = i
+		m.budget = 0 // steps owed at the old speed don't carry over
 	}
 }
 

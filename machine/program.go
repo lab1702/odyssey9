@@ -21,6 +21,9 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 	for sc.Scan() {
 		lineNo++
 		line := sc.Text()
+		if lineNo == 1 {
+			line = strings.TrimPrefix(line, "\uFEFF") // UTF-8 byte order mark
+		}
 		if i := strings.IndexAny(line, ";#"); i >= 0 {
 			line = line[:i]
 		}
@@ -59,10 +62,11 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 }
 
 // FormatProgram writes program memory as a listing that ParseProgram can
-// read back. Trailing empty (00) steps are omitted.
+// read back. Trailing empty (00) steps are omitted, but step 00 is always
+// written so that an empty program still loads.
 func FormatProgram(w io.Writer, title string, mem *[Steps]byte) error {
-	last := -1
-	for i := Steps - 1; i >= 0; i-- {
+	last := 0
+	for i := Steps - 1; i > 0; i-- {
 		if mem[i] != 0 {
 			last = i
 			break

@@ -305,6 +305,54 @@ func TestProgramFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEmptyProgramRoundTrip(t *testing.T) {
+	var empty [Steps]byte
+	var buf bytes.Buffer
+	if err := FormatProgram(&buf, "Empty", &empty); err != nil {
+		t.Fatal(err)
+	}
+	q, err := ParseProgram(&buf)
+	if err != nil {
+		t.Fatalf("empty program does not load back: %v", err)
+	}
+	if *q != empty {
+		t.Errorf("empty program round trip mismatch")
+	}
+}
+
+func TestParseProgramBOM(t *testing.T) {
+	p, err := ParseProgram(strings.NewReader("\xEF\xBB\xBF00 60 05\n02 FF\n"))
+	if err != nil {
+		t.Fatalf("listing with byte order mark: %v", err)
+	}
+	if p[0] != 0x60 || p[1] != 0x05 || p[2] != 0xFF {
+		t.Errorf("got % X", p[:3])
+	}
+}
+
+// Leftover FAST budget must not burst out when the speed is lowered during
+// a SIG buzz.
+func TestSpeedChangeDuringSig(t *testing.T) {
+	var prog [Steps]byte
+	prog[0] = 0x05 // SIG
+	for i := 1; i < Steps; i++ {
+		prog[i] = 0x03 // INC
+	}
+	m := New()
+	m.LoadProgram(&prog)
+	m.SetSpeed(2) // FAST
+	m.Press(KeyE)
+	frame := time.Second / 60
+	m.Update(frame)
+	m.SetSpeed(0) // SLOW
+	for i := 0; i < 66; i++ {
+		m.Update(frame)
+	}
+	if m.A > 0x01 {
+		t.Errorf("A=%02X: program ran ahead after switching to SLOW", m.A)
+	}
+}
+
 func TestBuiltInGames(t *testing.T) {
 	m := New()
 	m.Press(Key3) // Computer Telepathy from the title screen
