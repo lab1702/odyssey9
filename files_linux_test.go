@@ -147,6 +147,44 @@ func TestFailedSaveThroughLinkLeavesNothing(t *testing.T) {
 	}
 }
 
+// A file rewritten in place that can't be read isn't emptied when the new
+// program can't be written in full: there is nothing to put back.
+func TestFailedSaveOverUnreadableFile(t *testing.T) {
+	g := testGame(t)
+	old := strings.Repeat("; my old program\n", 10)
+	if err := os.WriteFile(g.file, []byte(old), 0o222); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(g.file); err == nil {
+		f.Close()
+		t.Skip("write-only file still readable (running as root?)")
+	}
+	if err := os.Link(g.file, filepath.Join(t.TempDir(), "other.txt")); err != nil {
+		t.Skip("no hard links:", err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	g.save() // asks to replace a file it can't read
+	var lim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
+		t.Skip(err)
+	}
+	small := lim
+	small.Cur = 10
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &small); err != nil {
+		t.Skip(err)
+	}
+	g.save()
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &lim); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(g.toast, "Save failed") {
+		t.Fatalf("SAVE past the size limit: toast %q", g.toast)
+	}
+	if fi, err := os.Stat(g.file); err != nil || fi.Size() < int64(len(old)) {
+		t.Errorf("failed SAVE over an unreadable file cut it short: %v", err)
+	}
+}
+
 // A new file that can't be written in full isn't left half written.
 func TestFailedNewSaveLeavesNothing(t *testing.T) {
 	g := testGame(t)

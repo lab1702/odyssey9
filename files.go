@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"odyssey9/machine"
@@ -61,7 +62,11 @@ func (g *game) save() {
 	// be read, needs confirming.
 	switch {
 	case err == nil:
-		if !g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
+		prompt := "Press SAVE again to replace the program in " + g.file
+		if g.m.Mem == ([machine.Steps]byte{}) {
+			prompt = "No program to save: press SAVE again to empty " + g.file
+		}
+		if !g.confirm("save", prompt) {
 			return
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -266,8 +271,8 @@ func openChecked(name string, flag int, perm fs.FileMode) (*os.File, error) {
 // writeInPlace rewrites the existing file name with data, keeping it the
 // same file. Rather than truncating the file first, it writes over the old
 // contents, and if that fails, such as when the disk is full, it puts them
-// back, so the old program isn't lost. The old contents' space is still
-// the file's, so putting them back needs no more.
+// back, so the old program isn't lost. The old contents' space is usually
+// still the file's then, so putting them back needs no more.
 func writeInPlace(name string, data []byte) error {
 	// A file too large to be a listing isn't kept to put back.
 	var old []byte
@@ -363,12 +368,18 @@ func (g *game) saveRecovery() (string, error) {
 	return name, err
 }
 
+// recovering is the name of the recovery file being written, if any, for
+// when a second Ctrl+C stops the emulator before it is done.
+var recovering atomic.Pointer[string]
+
 // writeRecovery writes data to a new recovery file in dir.
 func writeRecovery(dir string, data []byte) (string, error) {
 	f, err := os.CreateTemp(dir, "odyssey9-recovered-*.txt")
 	if err != nil {
 		return "", err
 	}
+	name := f.Name()
+	recovering.Store(&name)
 	_, err = f.Write(data)
 	if err == nil {
 		err = f.Sync()
@@ -377,10 +388,12 @@ func writeRecovery(dir string, data []byte) (string, error) {
 		err = cerr
 	}
 	if err != nil {
-		os.Remove(f.Name())
+		os.Remove(name)
+		recovering.Store(nil)
 		return "", err
 	}
-	return f.Name(), nil
+	syncDir(dir)
+	return name, nil
 }
 
 func (g *game) load() {

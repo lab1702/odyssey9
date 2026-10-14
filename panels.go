@@ -77,7 +77,7 @@ var helpText = []string{
 	"PC KEYBOARD",
 	"Letters, digits, . ? + - = type directly   * → ×   / → ÷   space → SPACE",
 	"[ → YES   ] → NO   Enter → ENTER   Delete → CLEAR   Esc → RESET",
-	"Backspace erases the last character while typing an instruction",
+	"Backspace erases while typing an instruction, else it is CLEAR",
 	"",
 	"EMULATOR",
 	"F1 help · F2 save · F3 load · F4 programs · F5 speed · F6 monitor · F7 colours · F8 power",

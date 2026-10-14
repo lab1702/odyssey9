@@ -944,9 +944,7 @@ func TestUndefinedOpcodeDoesNothing(t *testing.T) {
 	m := New()
 	m.LoadProgram(&[Steps]byte{0x06, 0x03, 0xFF}) // ?, INC, HLT
 	m.Press(KeyE)
-	for range 10 {
-		m.Step()
-	}
+	m.Update(time.Second)
 	if m.A != 0x01 || m.Status() != "HALT" {
 		t.Errorf("A=%02X, status %q; want 01 and HALT", m.A, m.Status())
 	}

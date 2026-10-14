@@ -136,9 +136,11 @@ There is a row of buttons under the TV, and each one also has a function key:
   listing. You can also drop a listing file onto the window. To keep you
   from losing work, a few actions only happen when repeated within four
   seconds:
-  * a SAVE that would replace a different program in the file
+  * a SAVE that would replace a different program in the file, or a file
+    it can't read
   * a LOAD, dropped file or PROGRAMS choice that would replace a program
     you haven't saved
+  * POWER, which erases the program, when you haven't saved it
   * closing the window while you have a program you haven't saved
 * **MONITOR (F6)** opens a side panel showing the registers, the accumulator,
   the program counter and a disassembly of program memory.

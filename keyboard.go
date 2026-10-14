@@ -188,10 +188,8 @@ const (
 
 // hostKey is an Odyssey2 key typed on the host keyboard.
 type hostKey struct {
-	k machine.Key
-	// Not typed by a press seen: a key held down repeating, or a key
-	// Ebitengine doesn't know, which can't be told from one.
-	repeat bool
+	k      machine.Key
+	repeat bool // typed by a key held down repeating, not by a press
 }
 
 // hostKeyboard turns the host keyboard's input into Odyssey2 keys, one tick
@@ -205,7 +203,13 @@ type hostKeyboard struct {
 	// they come with their keys.
 	inputMethod bool
 
+	// The layout's name for a key, if known (ebiten.KeyName).
+	keyName func(ebiten.Key) string
+
+	ticks    int          // ticks so far
 	polls    int          // polls of the system's input so far
+	pollAt   int          // the tick of the last poll
+	pollGap  int          // ticks between the last two polls
 	waiting  []waitingKey // keys pressed whose characters haven't come, oldest first
 	dropped  []waitingKey // keys that stopped waiting just now, whose characters can still come
 	held     []hostKey    // keys pressed after those, waiting for them
@@ -215,7 +219,11 @@ type hostKeyboard struct {
 	probing  bool         // whether its character is still to come
 	lastKey  ebiten.Key   // the key whose character came last
 	lastChar rune         // and that character, or 0 if unsure
+	lastAt   int          // the tick it came
 	lastDown int          // the poll in which that key was last held down
+	anyDown  int          // the poll in which a key typing characters was last held down
+	other    rune         // the last character no key press seen typed
+	otherAt  int          // the tick it came
 }
 
 // waitingKey is a key pressed whose character hasn't come yet.
@@ -227,6 +235,15 @@ type waitingKey struct {
 
 // A pressed key's character is waited for at most about half a second.
 const charTicks = 30
+
+// Ticks within which the same character twice is two presses rather than
+// a key held down repeating, which takes longer to start (at least about
+// 225 ms on common systems), and within which the same character from a
+// key Ebitengine doesn't know is that key repeating.
+const (
+	repressTicks = 12
+	repeatTicks  = 6
+)
 
 // xInputMethod reports whether an X input method is in use, as named by
 // XMODIFIERS, as on most Linux desktops. Its characters come late. On
@@ -251,6 +268,7 @@ type keyInput struct {
 // including Backspace, Enter, Delete and Esc, so that a habit such as
 // Cmd+Backspace on a Mac doesn't CLEAR.
 func (h *hostKeyboard) poll(newPoll bool) []hostKey {
+	h.keyName = ebiten.KeyName
 	in := keyInput{down: inpututil.AppendPressedKeys(nil), newPoll: newPoll}
 	if !shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
 		in.chars = ebiten.AppendInputChars(nil)
@@ -280,10 +298,11 @@ func shortcutHeld(goos string, held func(ebiten.Key) bool) bool {
 // A character is a press's when a key waiting for its character takes it.
 // A held key repeats only until another key is pressed, so its repeats come
 // before the characters of keys pressed in the same tick: those keys take
-// the tick's last characters. Any others are a held key repeating, or a
-// key Ebitengine doesn't know. A key whose character is overdue, such as a
-// dead key, which types nothing by itself, stops waiting, but its
-// character can still come with the next poll.
+// the tick's last characters. Any others are a held key repeating, a key
+// Ebitengine doesn't know, or a key pressed again between two polls far
+// apart, which Ebitengine sees held down. A key whose character is
+// overdue, such as a dead key, which types nothing by itself, stops
+// waiting, but its character can still come with the next poll.
 //
 // Characters of keys pressed before this tick come first, as they were
 // typed first, and the keys pressed in this tick wait for any that haven't
@@ -295,8 +314,10 @@ func shortcutHeld(goos string, held func(ebiten.Key) bool) bool {
 // go last, after the characters of keys pressed with them, so a character
 // typed with them is lost rather than taken as a command.
 func (h *hostKeyboard) next(in keyInput) []hostKey {
+	h.ticks++
 	if in.newPoll {
 		h.polls++
+		h.pollGap, h.pollAt = h.ticks-h.pollAt, h.ticks
 	}
 	// An input method's characters can come later still at times.
 	lag := h.lag()
@@ -365,7 +386,7 @@ func (h *hostKeyboard) next(in keyInput) []hostKey {
 	for len(eligible) > 0 && len(h.waiting) > 1 {
 		r := in.chars[eligible[max(0, len(eligible)-len(h.waiting))]]
 		j := slices.IndexFunc(h.waiting, func(w waitingKey) bool { return isLetterKey(w.k) })
-		if j <= 0 || !typesNoLetter(h.waiting[0].k) || r > unicode.MaxASCII || !unicode.IsLetter(r) {
+		if j <= 0 || !h.cantType(h.waiting[0].k, r) {
 			break
 		}
 		h.waiting = h.waiting[j:]
@@ -384,24 +405,39 @@ func (h *hostKeyboard) next(in keyInput) []hostKey {
 	}
 	late := nDropped + min(n-nDropped, old) // taken by keys pressed before this tick
 
+	typingDown := slices.ContainsFunc(in.down, typesChar)
+	if typingDown {
+		h.anyDown = h.polls
+	}
 	var keys, now []hostKey
 	for i, r := range in.chars {
 		t := slices.Index(takers, i)
-		if t >= 0 {
+		repeat := false
+		switch {
+		case t >= 0:
 			w := takenBy(t)
-			h.lastKey, h.lastChar = w.k, r
+			h.lastKey, h.lastChar, h.lastAt = w.k, r, h.ticks
 			if h.probing && w.k == h.probe.k && w.poll == h.probe.poll {
 				h.probing = false
 				h.learn(h.polls-w.poll, t < nDropped)
 			}
+		case r == h.lastChar && h.pollGap >= 2 && h.ticks-h.lastAt <= repressTicks:
+			// Polls far enough apart can miss a key let go and pressed
+			// again: Ebitengine sees it held down.
+			h.lastAt = h.ticks
+		case h.anyDown > 0 && h.polls-h.anyDown <= h.lag()+1:
+			repeat = true // a key held down, or let go just now
+		default:
+			repeat = r == h.other && h.ticks-h.otherAt <= repeatTicks
+			h.other, h.otherAt = r, h.ticks
 		}
 		k, ok := keyForRune(r)
 		switch {
 		case !ok:
 		case t >= late || len(now) > 0:
-			now = append(now, hostKey{k, t < 0})
+			now = append(now, hostKey{k, repeat})
 		default:
-			keys = append(keys, hostKey{k, t < 0})
+			keys = append(keys, hostKey{k, repeat})
 		}
 	}
 	if n > 1 {
@@ -450,13 +486,30 @@ func (h *hostKeyboard) learn(lag int, dropped bool) {
 	h.maxLag = max(h.maxLag, lag)
 }
 
-// lag returns how many polls late a key's character can come: none
-// without an input method, and with one at least one, as many as seen.
+// lag returns how many polls late a key's character can come: with an
+// input method at least one, and otherwise none until characters are seen
+// to come late (see learn); then as many as seen.
 func (h *hostKeyboard) lag() int {
 	if h.inputMethod {
 		return max(h.maxLag, 1)
 	}
 	return h.maxLag
+}
+
+// cantType reports whether the host key k can't have typed r: r is an
+// ASCII letter and k types no letter.
+func (h *hostKeyboard) cantType(k ebiten.Key, r rune) bool {
+	if r > unicode.MaxASCII || !unicode.IsLetter(r) {
+		return false
+	}
+	if h.keyName != nil {
+		// The layout's name for the key says whether it types a letter,
+		// as the punctuation keys do on some layouts, such as Dvorak.
+		if name := []rune(h.keyName(k)); len(name) == 1 {
+			return name[0] > unicode.MaxASCII || !unicode.IsLetter(name[0])
+		}
+	}
+	return typesNoLetter(k)
 }
 
 // isWaiting reports whether the key k is waiting for its character.

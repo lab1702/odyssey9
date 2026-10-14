@@ -220,6 +220,92 @@ func TestVeryLateCharacter(t *testing.T) {
 	}
 }
 
+// With an input method, a character can come one poll later than the most
+// seen so far and keep its place, and a key pressed alone whose character
+// comes later still shows how late they come.
+func TestInputMethodTolerance(t *testing.T) {
+	ticks := []keyTick{{pressed: keyE}, {}, {pressed: keyEnter}, {chars: "E"}}
+	if got, _ := typed(ticks...); !slices.Equal(got, []machine.Key{machine.KeyE, machine.KeyEnter}) {
+		t.Errorf("%+v: typed %v, want E then ENTER", ticks, got)
+	}
+	kb := hostKeyboard{inputMethod: true}
+	typedOn(&kb, keyTick{pressed: keyE}, keyTick{}, keyTick{}, keyTick{chars: "E"})
+	if got := kb.lag(); got != 3 {
+		t.Errorf("lag %d after a character three polls late, want 3", got)
+	}
+}
+
+// A waiting key is only taken to have typed nothing when it can't have
+// typed the letter that comes: not a quote followed by D typing ' and D,
+// nor ä, nor on a layout where the key types a letter, such as the period
+// key on Dvorak.
+func TestTypedNothingOnlyWhenSure(t *testing.T) {
+	quote, period := []ebiten.Key{ebiten.KeyQuote}, []ebiten.Key{ebiten.KeyPeriod}
+	for _, chars := range []string{"'", "ä"} {
+		keys, repeats := typed(keyTick{pressed: quote}, keyTick{pressed: keyD, chars: chars}, keyTick{chars: "D"})
+		if !slices.Equal(keys, []machine.Key{machine.KeyD}) || repeats[0] {
+			t.Errorf("%s then D: typed %v, repeats %v, want D, a press", chars, keys, repeats)
+		}
+	}
+	dvorak := hostKeyboard{inputMethod: true, keyName: func(k ebiten.Key) string {
+		if k == ebiten.KeyPeriod {
+			return "v"
+		}
+		return ""
+	}}
+	keys, repeats := typedOn(&dvorak, keyTick{pressed: period}, keyTick{pressed: keyD, chars: "v"},
+		keyTick{pressed: keyEnter}, keyTick{chars: "e"})
+	if want := []machine.Key{machine.KeyV, machine.KeyE, machine.KeyEnter}; !slices.Equal(keys, want) || slices.Contains(repeats, true) {
+		t.Errorf("Dvorak v, e, Enter: typed %v, repeats %v, want %v, all presses", keys, repeats, want)
+	}
+}
+
+// If polls stop being counted, a key typing nothing holds Enter up for no
+// more than about half a second.
+func TestWaitWithoutPolls(t *testing.T) {
+	var kb hostKeyboard
+	kb.next(keyTick{pressed: []ebiten.Key{ebiten.KeyNumpad4}}.input())
+	kb.next(keyTick{pressed: keyEnter, sameFrame: true}.input())
+	for range charTicks + 1 {
+		if len(kb.next(sameTick.input())) > 0 {
+			return
+		}
+	}
+	t.Errorf("Enter held up for more than %d ticks", charTicks)
+}
+
+// At a low frame rate Ebitengine can miss a key let go and pressed again
+// between two polls, seeing it held down. Pressed twice quickly, a program
+// key still confirms replacing an unsaved program. 20 frames a second.
+func TestQuickDoubleTapConfirms(t *testing.T) {
+	g := testGame(t)
+	typeStep(g, machine.Key0, machine.Key8)
+	g.overlay = programsPanel
+	frame := func(k keyTick) {
+		g.typeHost(k)
+		g.typeHost(sameTick)
+		g.typeHost(sameTick)
+	}
+	frame(keyTick{chars: "E", pressed: keyE})
+	frame(keyTick{held: keyE})
+	frame(keyTick{chars: "E", held: keyE})
+	want := machine.Samples[strings.IndexByte(sampleKeys, 'E')]
+	if g.m.Mem != *want.Program() {
+		t.Errorf("E pressed twice quickly didn't load %s", want.Name)
+	}
+}
+
+// Keys typed in the same tick after the key that closed a panel don't
+// reach the console.
+func TestKeysAfterPanelClosed(t *testing.T) {
+	g := testGame(t)
+	g.overlay = programsPanel
+	g.typeHost(keyTick{chars: "5", pressed: []ebiten.Key{ebiten.KeyDigit5, ebiten.KeyEscape}})
+	if g.overlay != noPanel || len(g.keys) > 0 {
+		t.Errorf("panel %q, keys %v; want the program loaded and no keys", g.overlay, g.keys)
+	}
+}
+
 // At a low frame rate, a key let go and pressed again between two polls
 // isn't seen pressed again, but its character keeps its place. 15 frames a
 // second: E, Shift+8 (*), E within 100 ms.
@@ -294,8 +380,8 @@ func TestRepeatsToldApart(t *testing.T) {
 		{[]keyTick{{pressed: []ebiten.Key{ebiten.KeyDigit1}}, {chars: "1", held: []ebiten.Key{ebiten.KeyDigit1}}, {chars: "1", held: []ebiten.Key{ebiten.KeyDigit1}},
 			{pressed: []ebiten.Key{ebiten.KeyDigit2}}, {chars: "12", held: []ebiten.Key{ebiten.KeyDigit2}}},
 			[]bool{false, true, true, false}},
-		// a key Ebitengine doesn't know can't be told from a repeat
-		{[]keyTick{{chars: "?"}}, []bool{true}},
+		// a key Ebitengine doesn't know types a character too, and repeats
+		{[]keyTick{{chars: "?"}, {}, {chars: "?"}, {chars: "?"}}, []bool{false, true, true}},
 	} {
 		if _, got := typed(c.ticks...); !slices.Equal(got, c.want) {
 			t.Errorf("%+v: repeats %v, want %v", c.ticks, got, c.want)
@@ -312,6 +398,7 @@ func (g *game) typeHost(k keyTick) {
 // whose character comes after its press.
 func TestProgramsPanelTakesLateCharacter(t *testing.T) {
 	g := testGame(t)
+	g.kb.inputMethod = true
 	g.overlay = programsPanel
 	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyDigit3}})
 	g.typeHost(sameTick)
@@ -370,6 +457,7 @@ func TestLastRepeatWithNextPress(t *testing.T) {
 		}
 	}
 	g := testGame(t)
+	g.kb.inputMethod = true
 	typeStep(g, machine.Key0, machine.Key8)
 	g.overlay = programsPanel
 	g.typeHost(keyTick{pressed: keyE})
@@ -382,6 +470,7 @@ func TestLastRepeatWithNextPress(t *testing.T) {
 	}
 
 	g = testGame(t)
+	g.kb.inputMethod = true
 	g.overlay = programsPanel
 	three := []ebiten.Key{ebiten.KeyDigit3}
 	g.typeHost(keyTick{pressed: three})
@@ -397,6 +486,7 @@ func TestLastRepeatWithNextPress(t *testing.T) {
 // After Esc closes a panel, a key typed with an input method types.
 func TestTypingAfterPanelCloses(t *testing.T) {
 	g := testGame(t)
+	g.kb.inputMethod = true
 	g.overlay = programsPanel
 	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyEscape}})
 	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyR}})
@@ -580,14 +670,49 @@ func TestPowerOffDropsWaitingKeys(t *testing.T) {
 	g.clean = g.m.Mem
 	g.press(machine.KeyE)
 	tick(g)
-	g.press(machine.Key5) // waits, as the program never reads a key
+	g.press(machine.Key1) // waits, as the program never reads a key
 	tick(g)
 	g.togglePower()
 	g.togglePower()
-	g.press(machine.KeyReset)
 	tick(g)
-	if g.m.Mode() != machine.ModeCommand {
-		t.Errorf("mode %v after power on and RESET; want COMMAND", g.m.Mode())
+	if g.m.Mode() == machine.ModeGame || len(g.keys) > 0 {
+		t.Errorf("1 typed before POWER started a game after it (mode %v, %d keys left)", g.m.Mode(), len(g.keys))
+	}
+}
+
+// Update counts down a confirmation's four seconds in real time, taking at
+// most 100 ms from a long frame, and 1/60 s from the first.
+func TestUpdateTime(t *testing.T) {
+	g := testGame(t)
+	g.confirm("save", "again?")
+	g.Update()
+	if left := confirmTime - g.pendFor; left != time.Second/60 {
+		t.Errorf("first tick took %v, want 1/60 s", left)
+	}
+	g.pendFor = confirmTime
+	g.last = time.Now().Add(-time.Hour)
+	g.Update()
+	if left := confirmTime - g.pendFor; left != 100*time.Millisecond {
+		t.Errorf("a tick an hour long took %v, want 100 ms", left)
+	}
+	g.pendFor = confirmTime
+	g.last = time.Now().Add(-50 * time.Millisecond)
+	g.Update()
+	if left := confirmTime - g.pendFor; left < 50*time.Millisecond || left > 100*time.Millisecond {
+		t.Errorf("a 50 ms tick took %v", left)
+	}
+}
+
+// SAVE with nothing in memory over a program says it would leave the file
+// empty.
+func TestSaveEmptyProgramWarns(t *testing.T) {
+	g := testGame(t)
+	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.save()
+	if !strings.Contains(g.toast, "empty") {
+		t.Errorf("SAVE of an empty program over a file: toast %q", g.toast)
 	}
 }
 

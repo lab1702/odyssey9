@@ -94,8 +94,8 @@ func (c canvas) textWidth(s string, kind fontKind, size float32) float32 {
 	return float32(w) / c.s
 }
 
-// glyphImages holds one 8x7 white image per Odyssey2 character. It is
-// built on first use because images need the game loop to be running.
+// glyphImages holds one 8x7 white image per Odyssey2 character, built on
+// first use.
 var glyphImages [64]*ebiten.Image
 
 func initGlyphs() {

@@ -129,8 +129,8 @@ var stopping atomic.Bool
 func notifyStop() <-chan os.Signal {
 	var sigs []os.Signal
 	for _, s := range stopSignals {
-		// A signal the emulator was started ignoring, as by nohup, stays
-		// ignored.
+		// SIGHUP or SIGINT the emulator was started ignoring, as by nohup,
+		// stays ignored. (Go doesn't say if others were.)
 		if !signal.Ignored(s) {
 			sigs = append(sigs, s)
 		}
@@ -154,8 +154,12 @@ func notifyStop() <-chan os.Signal {
 			if stopping.Load() {
 				time.Sleep(5 * time.Second) // main exits once the program is kept
 				msg = "Stopped before any unsaved program could be kept"
+				if name := recovering.Load(); name != nil {
+					msg = "Stopped while keeping your unsaved program in " + *name + ", which may be incomplete"
+				}
 			}
 			fmt.Fprintln(os.Stderr, msg)
+			raise(os.Interrupt)
 			os.Exit(1)
 		}
 	}()
