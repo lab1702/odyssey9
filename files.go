@@ -43,6 +43,15 @@ func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
 }
 
 func (g *game) save() {
+	old, err := readListing(openListing(g.file))
+	if err == nil {
+		if p, err := machine.ParseProgram(bytes.NewReader(old)); err == nil && *p == g.m.Mem {
+			// Rewriting the file would only lose the remarks written in it.
+			g.clean = g.m.Mem
+			g.showToast("Already saved in " + g.file)
+			return
+		}
+	}
 	// A file that can't be written isn't replaced, so say so before asking.
 	if err := checkWritable(g.file); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		g.showToast("Save failed: " + err.Error())
@@ -50,16 +59,8 @@ func (g *game) save() {
 	}
 	// Saving over a file that holds a different program, or one that can't
 	// be read, needs confirming.
-	old, err := readListing(openListing(g.file))
 	switch {
 	case err == nil:
-		p, err := machine.ParseProgram(bytes.NewReader(old))
-		if err == nil && *p == g.m.Mem {
-			// Rewriting the file would only lose the remarks written in it.
-			g.clean = g.m.Mem
-			g.showToast("Already saved in " + g.file)
-			return
-		}
 		if !g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
 			return
 		}
@@ -303,13 +304,18 @@ const maxListing = 1 << 20
 
 var errFolder = errors.New("this is a folder, not a program listing")
 
+// special are the kinds of file checkPlain refuses besides folders. Files
+// Windows calls irregular, which include those in OneDrive and other
+// cloud-synced folders, read like any other, so they aren't refused.
+const special = fs.ModeSymlink | fs.ModeNamedPipe | fs.ModeSocket | fs.ModeDevice | fs.ModeCharDevice
+
 // checkPlain refuses a folder or a special file, whose opening could
 // freeze the window, as a program listing.
 func checkPlain(fi fs.FileInfo) error {
 	switch {
 	case fi.IsDir():
 		return errFolder
-	case !fi.Mode().IsRegular():
+	case fi.Mode()&special != 0:
 		return errSpecialFile
 	}
 	return nil

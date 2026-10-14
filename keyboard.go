@@ -182,15 +182,35 @@ const (
 	keyErase     machine.Key = -11 // Backspace held down: only erases
 )
 
-// pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
-// this tick. Keys typed with a shortcut modifier held are left to the
-// system, including Backspace, Enter, Delete and Esc, so that a habit such
-// as Cmd+Backspace on a Mac doesn't CLEAR.
-func pollKeyboard() []machine.Key {
+// hostKey is an Odyssey2 key typed on the host keyboard.
+type hostKey struct {
+	k      machine.Key
+	repeat bool // typed by a key held down repeating, not by a press
+}
+
+// hostKeyboard turns the host keyboard's input into Odyssey2 keys, one tick
+// at a time. With an input method, as on most Linux desktops, a key's
+// character can come a tick after the key is reported pressed, so it keeps
+// count of the characters still to come.
+type hostKeyboard struct {
+	owed    int       // characters still to come for keys pressed
+	owedFor int       // ticks left to wait for them
+	held    []hostKey // keys pressed after those, waiting for them
+}
+
+// charWait is how many ticks a pressed key's character is waited for. A
+// key held down only starts repeating after a much longer time.
+const charWait = 3
+
+// poll returns the Odyssey2 keys typed on the host keyboard this tick.
+// Keys typed with a shortcut modifier held are left to the system,
+// including Backspace, Enter, Delete and Esc, so that a habit such as
+// Cmd+Backspace on a Mac doesn't CLEAR.
+func (h *hostKeyboard) poll() []hostKey {
 	if shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
-		return nil
+		return h.next(nil, nil, 0)
 	}
-	return hostKeys(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
+	return h.next(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
 		inpututil.KeyPressDuration(ebiten.KeyBackspace))
 }
 
@@ -209,37 +229,101 @@ func shortcutHeld(goos string, held func(ebiten.Key) bool) bool {
 	return (held(ebiten.KeyControl) || held(ebiten.KeyAlt)) && !held(ebiten.KeyAltRight)
 }
 
-// hostKeys turns one tick of host keyboard input into Odyssey2 keys: the
+// next turns one tick of host keyboard input into Odyssey2 keys: the
 // characters typed, the keys just pressed and how many ticks Backspace has
-// been held. Ebitengine doesn't say in what order characters and other keys
-// came within a tick, so they are put in the order that does least harm
-// when two land in the same tick. Backspace and Enter go first: if that is
-// wrong, the line on the screen shows it or the console beeps, where the
-// other order could silently store a wrong step. Delete and Esc go last, so
-// a character typed with them is lost rather than taken as a command.
-func hostKeys(chars []rune, pressed []ebiten.Key, backspace int) []machine.Key {
-	var keys, last []machine.Key
+// been held.
+//
+// Characters for keys pressed in an earlier tick come first, as they were
+// typed first, and Enter, Backspace, Delete and Esc wait for any that
+// haven't come yet. Otherwise Ebitengine doesn't say in what order
+// characters and other keys came within a tick, so they are put in the
+// order that does least harm when two land in the same tick. Backspace and
+// Enter go first: if that is wrong, the line on the screen shows it or the
+// console beeps, where the other order could silently store a wrong step.
+// Delete and Esc go last, so a character typed with them is lost rather
+// than taken as a command.
+func (h *hostKeyboard) next(chars []rune, pressed []ebiten.Key, backspace int) []hostKey {
+	if h.owedFor > 0 {
+		h.owedFor--
+	}
+	if h.owedFor == 0 {
+		h.owed = 0 // such as a dead key, which types nothing by itself
+	}
+	var keys []hostKey
+	late := min(h.owed, len(chars))
+	keys = appendChars(keys, chars[:late], false)
+	chars, h.owed = chars[late:], h.owed-late
+	if h.owed == 0 {
+		keys = append(keys, h.held...)
+		h.held = nil
+	}
+
+	var first, last []hostKey
 	// Backspace repeats while held, like typed characters: after half a
 	// second, 15 times a second.
 	if backspace == 1 {
-		keys = append(keys, keyBackspace)
+		first = append(first, hostKey{keyBackspace, false})
 	} else if backspace >= 30 && (backspace-30)%4 == 0 {
-		keys = append(keys, keyErase)
+		first = append(first, hostKey{keyErase, true})
 	}
+	typing := 0 // keys pressed that type a character
 	for _, p := range pressed {
-		switch p {
-		case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-			keys = append(keys, machine.KeyEnter)
-		case ebiten.KeyDelete:
-			last = append(last, machine.KeyClear)
-		case ebiten.KeyEscape:
-			last = append(last, machine.KeyReset)
+		switch {
+		case p == ebiten.KeyEnter || p == ebiten.KeyNumpadEnter:
+			first = append(first, hostKey{machine.KeyEnter, false})
+		case p == ebiten.KeyDelete:
+			last = append(last, hostKey{machine.KeyClear, false})
+		case p == ebiten.KeyEscape:
+			last = append(last, hostKey{machine.KeyReset, false})
+		case typesChar(p):
+			typing++
 		}
 	}
+	if h.owed > 0 {
+		// All of this tick's characters were late ones.
+		h.held = append(append(h.held, first...), last...)
+	} else {
+		keys = append(keys, first...)
+		// As many characters as keys were pressed are theirs. Any more
+		// are from a key held down.
+		n := min(typing, len(chars))
+		keys = appendChars(keys, chars[:n], false)
+		keys = appendChars(keys, chars[n:], true)
+		keys = append(keys, last...)
+		typing -= n
+	}
+	if typing > 0 {
+		h.owed, h.owedFor = h.owed+typing, charWait
+	}
+	return keys
+}
+
+// appendChars appends the Odyssey2 keys for the characters chars to keys.
+func appendChars(keys []hostKey, chars []rune, repeat bool) []hostKey {
 	for _, r := range chars {
 		if k, ok := keyForRune(r); ok {
-			keys = append(keys, k)
+			keys = append(keys, hostKey{k, repeat})
 		}
 	}
-	return append(keys, last...)
+	return keys
+}
+
+// typesChar reports whether the host key k types a character.
+func typesChar(k ebiten.Key) bool {
+	switch {
+	case k >= ebiten.KeyA && k <= ebiten.KeyZ,
+		k >= ebiten.KeyDigit0 && k <= ebiten.KeyDigit9,
+		k >= ebiten.KeyNumpad0 && k <= ebiten.KeyNumpad9:
+		return true
+	}
+	switch k {
+	case ebiten.KeySpace, ebiten.KeyMinus, ebiten.KeyEqual, ebiten.KeyBracketLeft,
+		ebiten.KeyBracketRight, ebiten.KeyBackslash, ebiten.KeySemicolon,
+		ebiten.KeyQuote, ebiten.KeyBackquote, ebiten.KeyComma, ebiten.KeyPeriod,
+		ebiten.KeySlash, ebiten.KeyIntlBackslash, ebiten.KeyNumpadAdd,
+		ebiten.KeyNumpadSubtract, ebiten.KeyNumpadMultiply, ebiten.KeyNumpadDivide,
+		ebiten.KeyNumpadDecimal, ebiten.KeyNumpadEqual:
+		return true
+	}
+	return false
 }

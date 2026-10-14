@@ -86,7 +86,6 @@ func (s *tone) sample() float64 {
 	// volume fades out, so the output never jumps (which would click).
 	next := machine.SoundNone
 	if s.left > 0 {
-		s.left--
 		next = s.seen.snd
 	}
 	fading := false
@@ -96,6 +95,10 @@ func (s *tone) sample() float64 {
 		} else {
 			s.cur, s.start = next, s.t
 		}
+	}
+	// A new sound's time starts once the old one has faded out.
+	if s.left > 0 && !fading {
+		s.left--
 	}
 	v, target := s.wave()
 	if fading {

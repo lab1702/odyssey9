@@ -41,8 +41,9 @@ func TestKeysTypedTogetherKeepASafeOrder(t *testing.T) {
 	}
 	tick(g)
 	// ENTER and the next digit typed within one tick
-	for _, k := range hostKeys([]rune{'0'}, []ebiten.Key{ebiten.KeyEnter}, 0) {
-		g.press(k)
+	var kb hostKeyboard
+	for _, k := range kb.next([]rune{'0'}, []ebiten.Key{ebiten.KeyEnter, ebiten.KeyDigit0}, 0) {
+		g.press(k.k)
 	}
 	tick(g)
 	if g.m.Mem[0] != 0x6B {
@@ -50,6 +51,114 @@ func TestKeysTypedTogetherKeepASafeOrder(t *testing.T) {
 	}
 	if got := g.m.Status(); got != "STEP 01 0" {
 		t.Errorf("status %q, want %q", got, "STEP 01 0")
+	}
+}
+
+// hostInput is one tick of host keyboard input.
+type hostInput struct {
+	chars   string
+	pressed []ebiten.Key
+}
+
+// typed returns the keys a hostKeyboard makes of the ticks of input in,
+// and which of them are repeats.
+func typed(in ...hostInput) (keys []machine.Key, repeats []bool) {
+	var kb hostKeyboard
+	for _, i := range in {
+		for _, k := range kb.next([]rune(i.chars), i.pressed, 0) {
+			keys, repeats = append(keys, k.k), append(repeats, k.repeat)
+		}
+	}
+	return keys, repeats
+}
+
+// With an input method, a key's character comes a tick after the key is
+// pressed, so it can come with, or after, an Enter pressed after it. It
+// must still come first.
+func TestLateCharacterComesBeforeEnter(t *testing.T) {
+	five, enter := []ebiten.Key{ebiten.KeyDigit5}, []ebiten.Key{ebiten.KeyEnter}
+	want := []machine.Key{machine.Key5, machine.KeyEnter}
+	for _, in := range [][]hostInput{
+		{{"", five}, {"5", enter}},
+		{{"", five}, {"", enter}, {"5", nil}},
+	} {
+		if got, _ := typed(in...); !slices.Equal(got, want) {
+			t.Errorf("%v: typed %v, want %v", in, got, want)
+		}
+	}
+	// A key that types nothing, such as a dead key, holds Enter up only
+	// briefly.
+	var kb hostKeyboard
+	kb.next(nil, five, 0)
+	for i := range charWait {
+		if got := kb.next(nil, nil, 0); len(got) > 0 {
+			return
+		}
+		if i == 0 {
+			kb.next(nil, enter, 0)
+		}
+	}
+	t.Errorf("Enter held up for %d ticks by a key that typed nothing", charWait)
+}
+
+// A held key's character repeating is told apart from the key's press,
+// even when the press's character comes late.
+func TestRepeatsToldApart(t *testing.T) {
+	a := []ebiten.Key{ebiten.KeyA}
+	for _, in := range [][]hostInput{
+		{{"A", a}, {"A", nil}},
+		{{"", a}, {"A", nil}, {"A", nil}},
+	} {
+		if _, got := typed(in...); !slices.Equal(got, []bool{false, true}) {
+			t.Errorf("%v: repeats %v, want [false true]", in, got)
+		}
+	}
+}
+
+// With an input method, the PROGRAMS panel still takes a program's key,
+// whose character comes a tick after its press.
+func TestProgramsPanelTakesLateCharacter(t *testing.T) {
+	g := testGame(t)
+	g.overlay = programsPanel
+	g.typeHostKeys(g.kb.next(nil, []ebiten.Key{ebiten.KeyDigit3}, 0))
+	g.typeHostKeys(g.kb.next([]rune{'3'}, nil, 0))
+	if want := machine.Samples[2]; g.m.Mem != *want.Program() || g.overlay != noPanel {
+		t.Errorf("3 in the PROGRAMS panel didn't load %s and close the panel", want.Name)
+	}
+}
+
+// A program's key held down in the PROGRAMS panel doesn't confirm the
+// choice by repeating, nor type at the console once it has loaded the
+// program.
+func TestHeldKeyStaysInPanel(t *testing.T) {
+	g := testGame(t)
+	typeStep(g, machine.Key0, machine.Key8)
+	e := []ebiten.Key{ebiten.KeyE}
+	g.overlay = programsPanel
+	hold := func() {
+		for range 10 {
+			g.typeHostKeys(g.kb.next([]rune{'E'}, nil, 0))
+			tick(g)
+		}
+	}
+	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
+	hold()
+	if !g.unsaved() || g.overlay != programsPanel {
+		t.Fatal("E held down replaced an unsaved program without a second press")
+	}
+	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
+	hold()
+	want := machine.Samples[strings.IndexByte(sampleKeys, 'E')]
+	if g.m.Mem != *want.Program() || g.overlay != noPanel {
+		t.Fatalf("second E didn't load %s", want.Name)
+	}
+	if g.m.Mode() != machine.ModeCommand || len(g.keys) > 0 {
+		t.Errorf("E held down typed at the console: mode %v, %d keys queued", g.m.Mode(), len(g.keys))
+	}
+	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
+	g.typeHostKeys(g.kb.next([]rune{'E'}, nil, 0))
+	if len(g.keys) != 2 {
+		t.Errorf("E pressed and held after the panel closed: %d keys queued, want 2", len(g.keys))
 	}
 }
 

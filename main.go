@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 
@@ -62,6 +63,7 @@ func main() {
 	g := newGame(m, *file, sound)
 	g.monitor = *monitor
 	g.script, g.shotPath, g.shotWait = keys, *shot, shotDelay
+	g.signals = notifyStop()
 	ebiten.SetWindowTitle("Odyssey² Computer Intro! (Videopac 9)")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetWindowClosingHandled(true) // so closing can ask before losing work
@@ -87,6 +89,23 @@ func main() {
 		}
 		os.Exit(1)
 	}
+}
+
+// notifyStop returns a channel that receives the first signal asking the
+// emulator to stop, such as Ctrl+C in the terminal it was started from, or
+// the terminal closing. Update then stops it as an error does, so that an
+// unsaved program is kept. A second signal stops it at once, as the game
+// loop may be held up.
+func notifyStop() <-chan os.Signal {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, stopSignals...)
+	stop := make(chan os.Signal, 1)
+	go func() {
+		s := <-c
+		signal.Reset(stopSignals...)
+		stop <- s
+	}()
+	return stop
 }
 
 // isFlagSet reports whether the named flag was given on the command line.

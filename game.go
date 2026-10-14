@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"os"
 	"slices"
 	"time"
 
@@ -78,6 +80,8 @@ type game struct {
 	pendFor  time.Duration
 	keyLit   map[machine.Key]int // frames left to show a key as pressed
 	mouseKey machine.Key
+	kb       hostKeyboard
+	quiet    bool          // a key closed a panel: ignore it repeating
 	keys     []machine.Key // typed keys on their way to the console, oldest first
 	held     int           // how many of them were left waiting for a program
 	buttons  []button
@@ -92,7 +96,8 @@ type game struct {
 	shotWait int
 	shotNow  bool
 	quit     bool
-	quitErr  error // reported when quitting
+	quitErr  error            // reported when quitting
+	signals  <-chan os.Signal // a signal to stop, as from Ctrl+C in a terminal
 }
 
 func newGame(m *machine.Machine, file string, sound bool) *game {
@@ -294,6 +299,11 @@ func (g *game) Update() error {
 			return g.quitErr
 		}
 		return errQuit
+	}
+	select {
+	case s := <-g.signals:
+		return fmt.Errorf("stopped by signal: %v", s)
+	default:
 	}
 	if ebiten.IsWindowBeingClosed() && g.closeWindow() {
 		return errQuit

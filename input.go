@@ -39,17 +39,25 @@ func (g *game) handleShortcuts() {
 
 // handleKeys passes typed keys to the console, or to the open panel.
 func (g *game) handleKeys() {
+	g.typeHostKeys(g.kb.poll())
+}
+
+// typeHostKeys types keys from the host keyboard. A key held down repeats
+// its character, which mustn't count as the second press that confirms a
+// choice of program, nor type at the console once the key's press has
+// closed the panel.
+func (g *game) typeHostKeys(keys []hostKey) {
 	panel := g.overlay != noPanel
-	// A key held down repeats its character, which mustn't count as the
-	// second press that confirms a choice of program.
-	if panel && len(inpututil.AppendJustPressedKeys(nil)) == 0 {
-		return
-	}
-	for _, k := range pollKeyboard() {
+	for _, k := range keys {
+		if k.repeat && (g.overlay != noPanel || g.quiet) {
+			continue
+		}
+		g.quiet = false
+		g.typeKey(k.k)
 		if panel && g.overlay == noPanel {
+			g.quiet = true
 			break // the rest were typed at the panel that just closed
 		}
-		g.typeKey(k)
 	}
 }
 

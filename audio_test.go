@@ -100,6 +100,26 @@ func TestSoundLastsWhenPickedUpLate(t *testing.T) {
 	}
 }
 
+// A sound started while another is sounding plays for its whole length
+// after the other has faded out.
+func TestSoundAfterSoundLastsItsLength(t *testing.T) {
+	s := &tone{}
+	s.set(machine.SoundError, 400*time.Millisecond, 1)
+	s.run(50 * time.Millisecond)
+	s.set(machine.SoundBeep, 60*time.Millisecond, 2)
+	s.pickUp()
+	audible := 0
+	for range sampleRate / 5 {
+		s.sample()
+		if s.cur == machine.SoundBeep && s.vol > 0.05 {
+			audible++
+		}
+	}
+	if ms := audible * 1000 / sampleRate; ms < 60 {
+		t.Errorf("60 ms beep after an error sound audible for %d ms", ms)
+	}
+}
+
 // RESET or POWER stops a sound at once.
 func TestSoundCut(t *testing.T) {
 	s := playing(0, machine.SoundBuzz)

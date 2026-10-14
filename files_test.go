@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,6 +257,43 @@ func TestSaveRefusesReadOnlyFile(t *testing.T) {
 		t.Errorf("read-only file was replaced:\n%s", got)
 	}
 }
+
+// SAVE of a program a read-only file already holds says so, rather than
+// that it can't write the file.
+func TestSaveUnchangedReadOnlyFile(t *testing.T) {
+	g := testGame(t)
+	if err := os.WriteFile(g.file, []byte("00 08\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	g.save()
+	if !strings.HasPrefix(g.toast, "Already saved") || g.unsaved() {
+		t.Errorf("SAVE of the program in a read-only file: toast %q", g.toast)
+	}
+}
+
+// Windows calls files in OneDrive and other cloud-synced folders
+// irregular, but they are plain files that read like any other.
+func TestIrregularFileIsPlain(t *testing.T) {
+	if err := checkPlain(fileInfo{mode: 0o644 | fs.ModeIrregular}); err != nil {
+		t.Errorf("irregular file refused: %v", err)
+	}
+	for _, m := range []fs.FileMode{fs.ModeNamedPipe, fs.ModeSocket, fs.ModeDevice, fs.ModeDevice | fs.ModeCharDevice} {
+		if err := checkPlain(fileInfo{mode: 0o644 | m}); err != errSpecialFile {
+			t.Errorf("mode %v: checkPlain = %v, want errSpecialFile", m, err)
+		}
+	}
+}
+
+// fileInfo is an fs.FileInfo with only a mode.
+type fileInfo struct{ mode fs.FileMode }
+
+func (fi fileInfo) Name() string       { return "prog.txt" }
+func (fi fileInfo) Size() int64        { return 0 }
+func (fi fileInfo) Mode() fs.FileMode  { return fi.mode }
+func (fi fileInfo) ModTime() time.Time { return time.Time{} }
+func (fi fileInfo) IsDir() bool        { return fi.mode.IsDir() }
+func (fi fileInfo) Sys() any           { return nil }
 
 // The system follows a link's ".." from wherever the links before it lead,
 // so SAVE must create the file there, where LOAD will look for it.
