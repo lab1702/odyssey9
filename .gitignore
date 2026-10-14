@@ -3,5 +3,6 @@
 /odyssey9.exe
 /odyssey9-*
 
-# Manual scan (copyrighted, kept out of the repo)
+# Manual (copyrighted, kept out of the repo)
 *.pdf
+computer-intro.txt
