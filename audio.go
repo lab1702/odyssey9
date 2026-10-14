@@ -16,8 +16,9 @@ const sampleRate = 48000
 // machine's current sound.
 type tone struct {
 	sound atomic.Int32
-	t     float64 // seconds since start
-	vol   float64 // smoothed volume to avoid clicks
+	cur   machine.Sound // the waveform being generated
+	t     float64       // seconds since start
+	vol   float64       // smoothed volume to avoid clicks
 	lfsr  uint32
 	noise float64
 	nextN float64
@@ -43,10 +44,30 @@ func square(t, f float64) float64 {
 func (s *tone) sample() float64 {
 	const dt = 1.0 / sampleRate
 	s.t += dt
-	var v, target float64
-	switch machine.Sound(s.sound.Load()) {
+	// When the sound stops or changes, keep the old waveform going while its
+	// volume fades out, so the output never jumps (which would click).
+	next := machine.Sound(s.sound.Load())
+	fading := false
+	if next != s.cur {
+		if s.vol > 0.001 {
+			fading = true
+		} else {
+			s.cur = next
+		}
+	}
+	v, target := s.wave()
+	if fading {
+		target = 0
+	}
+	s.vol += (target - s.vol) * 0.004
+	return v * s.vol
+}
+
+// wave returns the current waveform's next value and its volume.
+func (s *tone) wave() (v, target float64) {
+	switch s.cur {
 	case machine.SoundBeep:
-		v, target = square(s.t, 988), 0.22
+		return square(s.t, 988), 0.22
 	case machine.SoundBuzz:
 		// The Odyssey2 buzz: a low square wave roughened by a noise shift
 		// register.
@@ -59,19 +80,18 @@ func (s *tone) sample() float64 {
 			s.lfsr = s.lfsr>>1 | bit<<15
 			s.noise = float64(bit)*2 - 1
 		}
-		v, target = 0.6*square(s.t, 98)+0.4*s.noise, 0.25
+		return 0.6*square(s.t, 98) + 0.4*s.noise, 0.25
 	case machine.SoundError:
-		v, target = square(s.t, 165), 0.22
+		return square(s.t, 165), 0.22
 	case machine.SoundChirp:
-		v, target = square(s.t, 1320+220*math.Sin(s.t*40)), 0.18
+		return square(s.t, 1320+220*math.Sin(s.t*40)), 0.18
 	case machine.SoundBeeps:
 		if math.Mod(s.t*6, 1) < 0.55 {
 			target = 0.22
 		}
-		v = square(s.t, 1175)
+		return square(s.t, 1175), target
 	}
-	s.vol += (target - s.vol) * 0.004
-	return v * s.vol
+	return 0, 0
 }
 
 // newAudio starts the sound output. It returns nil if audio is disabled.

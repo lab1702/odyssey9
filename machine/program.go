@@ -9,9 +9,11 @@ import (
 )
 
 // ParseProgram reads a program listing. Each line starts with a decimal
-// step number followed by one or more two-digit hex bytes; anything after
-// the bytes (an assembler mnemonic, a remark) is ignored, as is any text
-// after ';' or '#'. This accepts the listing format used in the manual:
+// step number followed by one or more two-digit hex bytes separated by
+// single spaces. The bytes end at the first word that isn't one or at a gap
+// of two or more spaces or a tab; anything after that (an assembler
+// mnemonic, a remark) is ignored, as is any text after ';' or '#'. This
+// accepts the listing format used in the manual:
 //
 //	04   6B 00  LDV.B.00   Set output position to 00
 func ParseProgram(r io.Reader) (*[Steps]byte, error) {
@@ -27,16 +29,20 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 		if i := strings.IndexAny(line, ";#"); i >= 0 {
 			line = line[:i]
 		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
-		step, err := strconv.Atoi(fields[0])
-		if err != nil || step < 0 || step >= Steps || len(fields[0]) > 2 {
-			return nil, fmt.Errorf("line %d: %q is not a step number 00-99", lineNo, fields[0])
+		first, rest, _ := strings.Cut(strings.ReplaceAll(line, "\t", "  "), " ")
+		step, err := strconv.Atoi(first)
+		if err != nil || step < 0 || step >= Steps || len(first) > 2 {
+			return nil, fmt.Errorf("line %d: %q is not a step number 00-99", lineNo, first)
 		}
+		// A wider gap separates the bytes from a remark, so a remark that
+		// starts with a hex-like word ("BE QUIET") isn't read as code.
+		rest, _, _ = strings.Cut(strings.TrimLeft(rest, " "), "  ")
 		n := 0
-		for _, f := range fields[1:] {
+		for _, f := range strings.Split(rest, " ") {
 			if len(f) != 2 {
 				break
 			}

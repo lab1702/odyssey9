@@ -19,8 +19,8 @@ files:
 * 100 program steps (00–99) that you enter in hex (machine code) or assembler
 * an 11-position output line on the TV, with the 63 symbols from the manual's
   "Computer Symbols" chart
-* all 8 operating modes: Command, Execution, Continue, Display, Program,
-  Assembler, Hex Input, Input and Roll
+* all 8 operating modes: Command, Execution, Display, Program, Assembler,
+  Hex Input, Input and Roll
 * the full instruction set, including HLT for debugging
 * the 4 built-in games: Creepy Crawler, Flash Card, Computer Telepathy and
   Between the Sheets
@@ -48,7 +48,9 @@ go build -o odyssey9 .        # odyssey9.exe on Windows
   ```
 
 To run the tests: `go test ./machine`. They run the programs from the manual
-and check what ends up on the screen.
+and check what ends up on the screen. They also check that `examples/`
+matches the programs in `machine/samples.go`. After changing a sample,
+regenerate the listings with `ODYSSEY9_EXPORT=../examples go test ./machine`.
 
 Command-line options:
 
@@ -58,6 +60,21 @@ Command-line options:
 | `-file FILE` | file used by SAVE / LOAD (default `~/odyssey9-program.txt`) |
 | `-monitor` | start with the monitor panel open |
 | `-mute` | no sound |
+| `-script KEYS` | testing aid: type these keys at start-up (see below) |
+| `-screenshot FILE` | testing aid: after the script has run, save a PNG of the window and quit (no sound) |
+
+If the emulator stops at start-up with an `oto:` or `audio:` error, your
+computer has no working sound output. Start it with `-mute`.
+
+A `-script` is typed one key at a time. Letters, digits and the symbols in
+the PC keyboard table stand for themselves. `{RESET}`, `{ENTER}`,
+`{CLEAR}`, `{YES}`, `{NO}` and `{SPACE}` press those keys. `{WAIT}`
+pauses, and `{HELP}`, `{PROGRAMS}` and `{SAVE}` work like the emulator's
+buttons. For example:
+
+```sh
+./odyssey9 -script "{RESET}PMI6B{ENTER}00{ENTER}" -screenshot out.png
+```
 
 ## Using it
 
@@ -101,6 +118,8 @@ There is a row of buttons under the TV, and each one also has a function key:
   * NORMAL: 1000 steps/s
   * FAST
 * **PROGRAMS (F4)** loads any of the 12 programs printed in the manual.
+  Click one, or press its key (1–9, A–C). Esc closes this panel and the
+  help panel.
 * **SAVE (F2)** / **LOAD (F3)** write and read your program as a text
   listing. You can also drop a listing file onto the window.
 * **MONITOR (F6)** opens a side panel showing the registers, the accumulator,
@@ -112,14 +131,22 @@ The `examples/` folder holds the manual's programs as listing files.
 
 ### Listing format
 
-Each line has a decimal step number, then one or more two-digit hex bytes.
-Everything after the bytes is ignored, so the manual's own tables load as they
-are:
+Each line has a decimal step number, then one or more two-digit hex bytes
+separated by single spaces. The bytes end at the first word that isn't one,
+or at a gap of two or more spaces or a tab. Everything after that is
+ignored, and so is any text after `;` or `#`. So the step lines of the
+manual's tables load as they are:
 
 ```
+; Message program
 04   6B 00  LDV.B.00   Set output position to 00
-30   1D 12 0E 0E 17 00 HELLO
+30   1D 12 0E 0E 17 00  HELLO
 ```
+
+The manual's column headings and its remarks on lines of their own are not
+step lines: delete them, or start them with `;`. A remark straight after the
+bytes needs two spaces in front of it. Otherwise one that starts with a
+hex-like word, such as `BE QUIET`, would be read as more bytes.
 
 ## How the computer behaves
 

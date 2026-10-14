@@ -330,6 +330,41 @@ func TestParseProgramBOM(t *testing.T) {
 	}
 }
 
+// A remark that starts with a hex-like word must not be read as code once
+// it is set apart from the bytes by a wider gap.
+func TestParseProgramRemark(t *testing.T) {
+	p, err := ParseProgram(strings.NewReader("05 C0  BE QUIET\n10\t07 BE\tAD\n20 6B 00 LDV.B.00\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]byte{5: 0xC0, 6: 0, 10: 0x07, 11: 0xBE, 12: 0, 20: 0x6B, 21: 0x00}
+	for step, b := range want {
+		if p[step] != b {
+			t.Errorf("step %02d = %02X, want %02X", step, p[step], b)
+		}
+	}
+	if _, err := ParseProgram(strings.NewReader("05  QUIET\n")); err == nil {
+		t.Errorf("a step with no hex code was accepted")
+	}
+}
+
+// RESET must silence the SIG buzz along with stopping the program.
+func TestResetStopsSound(t *testing.T) {
+	var prog [Steps]byte
+	prog[0] = 0x05 // SIG
+	m := New()
+	m.LoadProgram(&prog)
+	m.Press(KeyE)
+	m.Update(time.Second / 60)
+	if m.CurrentSound() != SoundBuzz {
+		t.Fatalf("SIG didn't buzz")
+	}
+	m.Press(KeyReset)
+	if s := m.CurrentSound(); s != SoundNone {
+		t.Errorf("sound %d still playing after RESET", s)
+	}
+}
+
 // Leftover FAST budget must not burst out when the speed is lowered during
 // a SIG buzz.
 func TestSpeedChangeDuringSig(t *testing.T) {
@@ -379,27 +414,58 @@ func TestBuiltInGames(t *testing.T) {
 	}
 }
 
+// sampleFile returns the file name and text of sample i as a listing in
+// examples/.
+func sampleFile(i int, s Sample) (name, text string) {
+	name = fmt.Sprintf("%02d-%s.txt", i+1, strings.Map(func(r rune) rune {
+		if r == ' ' {
+			return '-'
+		}
+		if r == '(' || r == ')' {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, s.Name))
+	text = fmt.Sprintf("; %s (from the Computer Intro! manual)\n; %s\n; Step  Hex    Assembler\n%s",
+		s.Name, s.Usage, strings.TrimLeft(s.Listing, "\n"))
+	return name, text
+}
+
 // TestExportSamples writes the manual's programs as listings when
-// ODYSSEY9_EXPORT names a directory: ODYSSEY9_EXPORT=examples go test ./machine
+// ODYSSEY9_EXPORT names a directory. go test runs in machine/, so to
+// regenerate the examples: ODYSSEY9_EXPORT=../examples go test ./machine
 func TestExportSamples(t *testing.T) {
 	dir := os.Getenv("ODYSSEY9_EXPORT")
 	if dir == "" {
 		t.Skip("ODYSSEY9_EXPORT not set")
 	}
 	for i, s := range Samples {
-		name := fmt.Sprintf("%02d-%s.txt", i+1, strings.Map(func(r rune) rune {
-			if r == ' ' {
-				return '-'
-			}
-			if r == '(' || r == ')' {
-				return -1
-			}
-			return unicode.ToLower(r)
-		}, s.Name))
-		text := fmt.Sprintf("; %s (from the Computer Intro! manual)\n; %s\n; Step  Hex    Assembler\n%s",
-			s.Name, s.Usage, strings.TrimLeft(s.Listing, "\n"))
+		name, text := sampleFile(i, s)
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// TestExamplesMatchSamples checks that examples/ holds exactly the listings
+// TestExportSamples would write.
+func TestExamplesMatchSamples(t *testing.T) {
+	files, err := filepath.Glob("../examples/*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != len(Samples) {
+		t.Errorf("examples/ has %d listings, want %d", len(files), len(Samples))
+	}
+	for i, s := range Samples {
+		name, want := sampleFile(i, s)
+		got, err := os.ReadFile(filepath.Join("..", "examples", name))
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("examples/%s differs from Samples[%d]; regenerate it with TestExportSamples", name, i)
 		}
 	}
 }

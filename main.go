@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -39,7 +40,10 @@ func main() {
 		m.LoadProgram(p)
 	}
 
-	g := newGame(m, *file, !*mute)
+	// Screenshot runs are for testing and often happen on machines without
+	// a sound card, so they are silent.
+	sound := !*mute && *shot == ""
+	g := newGame(m, *file, sound)
 	g.monitor = *monitor
 	g.script, g.shotPath, g.shotWait = parseScript(*script), *shot, 90
 	ebiten.SetWindowTitle("Odyssey² Computer Intro! (Videopac 9)")
@@ -49,6 +53,11 @@ func main() {
 	ebiten.SetTPS(60)
 	if err := ebiten.RunGame(g); err != nil && err != errQuit {
 		fmt.Fprintln(os.Stderr, err)
+		// A missing or broken sound device is only reported once the game
+		// is running, as an error from the audio library.
+		if msg := err.Error(); sound && (strings.HasPrefix(msg, "oto:") || strings.HasPrefix(msg, "audio:")) {
+			fmt.Fprintln(os.Stderr, "The sound output failed. Run with -mute to start without sound.")
+		}
 		os.Exit(1)
 	}
 }

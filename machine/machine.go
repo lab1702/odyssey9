@@ -303,6 +303,7 @@ func (m *Machine) reset() {
 	m.game = nil
 	m.waitReg = -2
 	m.blockLeft = 0
+	m.sound, m.soundLeft = SoundNone, 0
 	m.inBuf = nil
 	if m.mode == ModeGame || m.mode == ModeSelect {
 		m.clearScreen()
