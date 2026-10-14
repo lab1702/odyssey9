@@ -61,6 +61,13 @@ const (
 	SoundBeeps       // a couple of quick beeps
 )
 
+// Indexes into Speeds.
+const (
+	SpeedSlow = iota
+	SpeedNormal
+	SpeedFast
+)
+
 // Speed presets in program steps executed per second.
 var Speeds = []struct {
 	Name string
@@ -99,7 +106,7 @@ type Machine struct {
 	display string
 
 	// execution
-	waitReg   int  // register awaiting a key (-1 = accumulator), or -2
+	waitReg   int  // register awaiting a key, waitAcc or notWaiting
 	halted    bool // stopped by HLT
 	budget    float64
 	blockLeft time.Duration // remaining time the program is paused for SIG
@@ -112,9 +119,15 @@ type Machine struct {
 	rng  *rand.Rand
 }
 
+// Values of waitReg besides a register number.
+const (
+	waitAcc    = -1 // INA: the key goes into the accumulator
+	notWaiting = -2 // the program isn't reading the keyboard
+)
+
 // New returns a machine that has just been switched on.
 func New() *Machine {
-	m := &Machine{speed: 1, rng: rand.New(rand.NewSource(time.Now().UnixNano()))}
+	m := &Machine{speed: SpeedNormal, rng: rand.New(rand.NewSource(time.Now().UnixNano()))}
 	m.PowerOn()
 	return m
 }
@@ -129,7 +142,7 @@ func (m *Machine) PowerOn() {
 	m.editStep = 0
 	m.inBuf = nil
 	m.display = ""
-	m.waitReg = -2
+	m.waitReg = notWaiting
 	m.halted = false
 	m.blockLeft = 0
 	m.game = nil
@@ -144,7 +157,7 @@ func (m *Machine) Mode() Mode { return m.mode }
 func (m *Machine) EditStep() int { return m.editStep }
 
 // WaitingForKey reports whether a running program is waiting for input.
-func (m *Machine) WaitingForKey() bool { return m.mode == ModeExecute && m.waitReg != -2 }
+func (m *Machine) WaitingForKey() bool { return m.mode == ModeExecute && m.waitReg != notWaiting }
 
 // Speed returns the index into Speeds of the current execution speed.
 func (m *Machine) Speed() int { return m.speed }
@@ -206,7 +219,7 @@ func (m *Machine) Status() string {
 		}
 		return "COMMAND"
 	case ModeExecute:
-		if m.waitReg != -2 {
+		if m.waitReg != notWaiting {
 			return "?"
 		}
 		return ""
@@ -301,7 +314,7 @@ func (m *Machine) Backspace() {
 func (m *Machine) reset() {
 	m.note = ""
 	m.game = nil
-	m.waitReg = -2
+	m.waitReg = notWaiting
 	m.blockLeft = 0
 	m.sound, m.soundLeft = SoundNone, 0
 	m.inBuf = nil
@@ -343,7 +356,7 @@ func (m *Machine) pressCommand(k Key) {
 
 func (m *Machine) startRunning() {
 	m.mode = ModeExecute
-	m.waitReg = -2
+	m.waitReg = notWaiting
 	m.blockLeft = 0
 	m.budget = 0
 }
@@ -426,15 +439,15 @@ func (m *Machine) enterStatement() {
 }
 
 func (m *Machine) pressExecute(k Key) {
-	if m.waitReg == -2 {
+	if m.waitReg == notWaiting {
 		return // the program only reads the keyboard at INP/INA
 	}
-	if m.waitReg == -1 {
+	if m.waitReg == waitAcc {
 		m.A = k.Code()
 	} else {
 		m.R[m.waitReg] = k.Code()
 	}
-	m.waitReg = -2
+	m.waitReg = notWaiting
 	m.play(SoundBeep, 60*time.Millisecond)
 }
 
@@ -473,11 +486,11 @@ func (m *Machine) run(dt time.Duration) {
 	if limit := ips / 10; m.budget > limit && limit >= 1 {
 		m.budget = limit // don't try to catch up after a stall
 	}
-	for m.budget >= 1 && m.mode == ModeExecute && m.waitReg == -2 && m.blockLeft <= 0 {
+	for m.budget >= 1 && m.mode == ModeExecute && m.waitReg == notWaiting && m.blockLeft <= 0 {
 		m.budget--
 		m.Step()
 	}
-	if m.waitReg != -2 {
+	if m.waitReg != notWaiting {
 		m.budget = 0
 	}
 }
@@ -505,96 +518,93 @@ func (m *Machine) output(code byte) {
 func (m *Machine) Step() {
 	start := m.PC
 	op := m.fetch()
+	o, ok := decode(op)
+	if !ok {
+		return // undefined opcodes behave as NOP
+	}
 	r := int(op & 0x0F)
-	switch {
-	case op == 0x00: // NOP
-	case op == 0x01: // CLR
+	var nn byte
+	if o.size() == 2 {
+		nn = m.fetch()
+	}
+	target := bcdToStep(nn)
+	switch o.op {
+	case opNOP:
+	case opCLR:
 		m.A = 0
-	case op == 0x02: // DEC
+	case opDEC:
 		m.A = bcdSub(m.A, 1)
-	case op == 0x03: // INC
+	case opINC:
 		m.A = bcdAdd(m.A, 1)
-	case op == 0x04: // INA
-		m.waitReg = -1
-	case op == 0x05: // SIG
+	case opINA:
+		m.waitReg = waitAcc
+	case opSIG:
 		m.play(SoundBuzz, time.Second)
 		m.blockLeft = time.Second
-	case op == 0x07: // RET
+	case opRET:
 		m.PC = m.S
-	case op == 0x08: // RND
+	case opRND:
 		m.A = stepToBCD(m.rng.Intn(100))
-	case op == 0x09: // MOV: load A from the step addressed by register C
+	case opMOV: // load A from the step addressed by register C
 		m.A = m.Mem[bcdToStep(m.R[RegC])]
 		m.R[RegC] = bcdAdd(m.R[RegC], 1)
-	case op == 0x0B: // OTA
+	case opOTA:
 		m.output(m.A)
-	case op >= 0x10 && op <= 0x14:
-		target := bcdToStep(m.fetch())
-		switch op {
-		case 0x10: // BDB: branch if the high digit of A is 9
-			if m.A>>4 == 9 {
-				m.PC = target
-			}
-		case 0x11: // BDC: branch if the high digit of A is not 0
-			if m.A>>4 != 0 {
-				m.PC = target
-			}
-		case 0x12: // GTO
-			m.PC = target
-		case 0x13: // BRZ
-			if m.A == 0 {
-				m.PC = target
-			}
-		case 0x14: // GTS
-			m.S = m.PC
+	case opBDB: // branch if the high digit of A is 9
+		if m.A>>4 == 9 {
 			m.PC = target
 		}
-	case op >= 0x20 && op <= 0x6F:
-		nn := m.fetch()
-		target := bcdToStep(nn)
-		reg := m.R[r]
-		switch op >> 4 {
-		case 2: // BNE
-			if reg != m.A {
-				m.PC = target
-			}
-		case 3: // BEQ
-			if reg == m.A {
-				m.PC = target
-			}
-		case 4: // BGT
-			if reg > m.A {
-				m.PC = target
-			}
-		case 5: // BLS
-			if reg < m.A {
-				m.PC = target
-			}
-		case 6: // LDV
-			m.R[r] = nn
+	case opBDC: // branch if the high digit of A is not 0
+		if m.A>>4 != 0 {
+			m.PC = target
 		}
-	case op>>4 == 0x7: // INP
+	case opGTO:
+		m.PC = target
+	case opBRZ:
+		if m.A == 0 {
+			m.PC = target
+		}
+	case opGTS:
+		m.S = m.PC
+		m.PC = target
+	case opBNE:
+		if m.R[r] != m.A {
+			m.PC = target
+		}
+	case opBEQ:
+		if m.R[r] == m.A {
+			m.PC = target
+		}
+	case opBGT:
+		if m.R[r] > m.A {
+			m.PC = target
+		}
+	case opBLS:
+		if m.R[r] < m.A {
+			m.PC = target
+		}
+	case opLDV:
+		m.R[r] = nn
+	case opINP:
 		m.waitReg = r
-	case op>>4 == 0x8: // PAK
+	case opPAK:
 		m.A = m.R[r]&0x0F<<4 | m.R[(r+1)&0x0F]&0x0F
-	case op>>4 == 0x9: // LDA
+	case opLDA:
 		m.A = m.R[r]
-	case op>>4 == 0xA: // STO
+	case opSTO:
 		m.R[r] = m.A
-	case op>>4 == 0xB: // UNP
+	case opUNP:
 		m.R[r] = m.A >> 4
 		m.R[(r+1)&0x0F] = m.A & 0x0F
-	case op>>4 == 0xC: // OUT
+	case opOUT:
 		m.output(m.R[r])
-	case op>>4 == 0xD: // SUB: A = register - A
+	case opSUB: // A = register - A
 		m.A = bcdSub(m.R[r], m.A)
-	case op>>4 == 0xE: // ADD
+	case opADD:
 		m.A = bcdAdd(m.A, m.R[r])
-	case op == 0xFF: // HLT
+	case opHLT:
 		m.PC = start
 		m.halted = true
 		m.mode = ModeCommand
-	default:
-		// Undefined opcodes behave as NOP.
 	}
 }

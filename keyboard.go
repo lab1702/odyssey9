@@ -147,14 +147,22 @@ var typedKeys = map[rune]machine.Key{
 	']': machine.KeyNo,
 }
 
+// keyForRune returns the Odyssey2 key for a character typed on the computer
+// keyboard.
+func keyForRune(r rune) (machine.Key, bool) {
+	if k := machine.KeyForLetter(r); k != machine.KeyNone {
+		return k, true
+	}
+	k, ok := typedKeys[r]
+	return k, ok
+}
+
 // pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
 // this frame. Backspace is reported separately because it is an emulator
 // editing aid rather than an Odyssey2 key; repeat says it is being held.
 func pollKeyboard() (keys []machine.Key, backspace, repeat bool) {
 	for _, r := range ebiten.AppendInputChars(nil) {
-		if k := machine.KeyForLetter(r); k != machine.KeyNone {
-			keys = append(keys, k)
-		} else if k, ok := typedKeys[r]; ok {
+		if k, ok := keyForRune(r); ok {
 			keys = append(keys, k)
 		}
 	}

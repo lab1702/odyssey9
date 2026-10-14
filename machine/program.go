@@ -82,9 +82,6 @@ func FormatProgram(w io.Writer, title string, mem *[Steps]byte) error {
 	fmt.Fprintf(bw, "; %s\n; Odyssey2 Computer Intro! program listing\n; Step  Hex    Assembler\n", title)
 	for step := 0; step <= last; {
 		text, n := Disassemble(mem, step)
-		if step+n > Steps {
-			n = 1
-		}
 		hex := fmt.Sprintf("%02X", mem[step])
 		if n == 2 {
 			hex += fmt.Sprintf(" %02X", mem[step+1])

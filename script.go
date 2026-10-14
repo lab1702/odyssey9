@@ -21,6 +21,10 @@ var scriptWords = map[string]machine.Key{
 	"HELP": scriptHelp, "PROGRAMS": scriptPrograms, "WAIT": machine.KeyNone, "SAVE": scriptSave,
 }
 
+// shotDelay is how many frames to wait after the last scripted key before
+// taking the screenshot, so the screen has settled.
+const shotDelay = 90
+
 // pseudo-keys that open the emulator's overlays
 const (
 	scriptHelp     machine.Key = -1
@@ -46,13 +50,11 @@ func parseScript(s string) ([]machine.Key, error) {
 		}
 		r, size := utf8.DecodeRuneInString(s)
 		s = s[size:]
-		if k := machine.KeyForLetter(r); k != machine.KeyNone {
-			keys = append(keys, k)
-		} else if k, ok := typedKeys[r]; ok {
-			keys = append(keys, k)
-		} else {
+		k, ok := keyForRune(r)
+		if !ok {
 			return nil, fmt.Errorf("script: no key for %q", r)
 		}
+		keys = append(keys, k)
 	}
 	return keys, nil
 }
@@ -62,9 +64,9 @@ func (g *game) runScript() {
 	if len(g.script) > 0 && g.frame%4 == 0 {
 		switch k := g.script[0]; k {
 		case scriptHelp:
-			g.toggleOverlay("help")
+			g.toggleOverlay(helpPanel)
 		case scriptPrograms:
-			g.toggleOverlay("programs")
+			g.toggleOverlay(programsPanel)
 		case scriptSave:
 			g.save()
 		case machine.KeyNone:
@@ -72,7 +74,7 @@ func (g *game) runScript() {
 			g.press(k)
 		}
 		g.script = g.script[1:]
-		g.shotWait = 90
+		g.shotWait = shotDelay
 	}
 	if len(g.script) == 0 && g.shotPath != "" && g.shotWait > 0 {
 		g.shotWait--

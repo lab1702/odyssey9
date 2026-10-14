@@ -113,6 +113,28 @@ func TestAssembleRoundTrip(t *testing.T) {
 	}
 }
 
+// A two-byte instruction at step 99 executes with its operand from step
+// 00, but listings show that byte on step 00's own line.
+func TestInstructionAtStep99(t *testing.T) {
+	var mem [Steps]byte
+	mem[0], mem[99] = 0x15, opGTO
+	if text, n := Disassemble(&mem, 99); text != "GTO.15" || n != 1 {
+		t.Errorf("Disassemble at 99 = %q, %d", text, n)
+	}
+	var buf bytes.Buffer
+	FormatProgram(&buf, "t", &mem)
+	if !strings.Contains(buf.String(), "\n99    12     GTO.15\n") {
+		t.Errorf("listing:\n%s", buf.String())
+	}
+	m := New()
+	m.LoadProgram(&mem)
+	m.PC = 99
+	m.Step()
+	if m.PC != 15 {
+		t.Errorf("GTO at step 99 went to %02d", m.PC)
+	}
+}
+
 // Every assembler statement printed in the manual's listings must assemble
 // to the hex code printed beside it.
 func TestSampleMnemonics(t *testing.T) {
@@ -412,11 +434,11 @@ func TestSpeedChangeDuringSig(t *testing.T) {
 	}
 	m := New()
 	m.LoadProgram(&prog)
-	m.SetSpeed(2) // FAST
+	m.SetSpeed(SpeedFast)
 	m.Press(KeyE)
 	frame := time.Second / 60
 	m.Update(frame)
-	m.SetSpeed(0) // SLOW
+	m.SetSpeed(SpeedSlow)
 	for i := 0; i < 66; i++ {
 		m.Update(frame)
 	}

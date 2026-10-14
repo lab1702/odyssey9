@@ -55,7 +55,7 @@ func main() {
 	sound := !*mute && *shot == ""
 	g := newGame(m, *file, sound)
 	g.monitor = *monitor
-	g.script, g.shotPath, g.shotWait = keys, *shot, 90
+	g.script, g.shotPath, g.shotWait = keys, *shot, shotDelay
 	ebiten.SetWindowTitle("Odyssey² Computer Intro! (Videopac 9)")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	w, h := g.windowSize()

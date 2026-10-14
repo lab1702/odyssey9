@@ -17,42 +17,84 @@ const (
 	formRNN              // XR NN         e.g. LDV.R.NN
 )
 
+// Opcodes. An instruction with a register operand has the register in its
+// low digit: OUT.5 is opOUT|5 = C5.
+const (
+	opNOP byte = 0x00
+	opCLR byte = 0x01
+	opDEC byte = 0x02
+	opINC byte = 0x03
+	opINA byte = 0x04
+	opSIG byte = 0x05
+	opRET byte = 0x07
+	opRND byte = 0x08
+	opMOV byte = 0x09
+	opOTA byte = 0x0B
+	opBDB byte = 0x10
+	opBDC byte = 0x11
+	opGTO byte = 0x12
+	opBRZ byte = 0x13
+	opGTS byte = 0x14
+	opBNE byte = 0x20
+	opBEQ byte = 0x30
+	opBGT byte = 0x40
+	opBLS byte = 0x50
+	opLDV byte = 0x60
+	opINP byte = 0x70
+	opPAK byte = 0x80
+	opLDA byte = 0x90
+	opSTO byte = 0xA0
+	opUNP byte = 0xB0
+	opOUT byte = 0xC0
+	opSUB byte = 0xD0
+	opADD byte = 0xE0
+	opHLT byte = 0xFF
+)
+
 type opInfo struct {
 	mnemonic string
 	op       byte
 	form     form
 }
 
+// size is the number of bytes (program steps) the instruction occupies.
+func (o opInfo) size() int {
+	if o.form == formNN || o.form == formRNN {
+		return 2
+	}
+	return 1
+}
+
 var opTable = []opInfo{
-	{"NOP", 0x00, formNone},
-	{"CLR", 0x01, formNone},
-	{"DEC", 0x02, formNone},
-	{"INC", 0x03, formNone},
-	{"INA", 0x04, formNone},
-	{"SIG", 0x05, formNone},
-	{"RET", 0x07, formNone},
-	{"RND", 0x08, formNone},
-	{"MOV", 0x09, formNone},
-	{"OTA", 0x0B, formNone},
-	{"HLT", 0xFF, formNone},
-	{"BDB", 0x10, formNN},
-	{"BDC", 0x11, formNN},
-	{"GTO", 0x12, formNN},
-	{"BRZ", 0x13, formNN},
-	{"GTS", 0x14, formNN},
-	{"BNE", 0x20, formRNN},
-	{"BEQ", 0x30, formRNN},
-	{"BGT", 0x40, formRNN},
-	{"BLS", 0x50, formRNN},
-	{"LDV", 0x60, formRNN},
-	{"INP", 0x70, formR},
-	{"PAK", 0x80, formR},
-	{"LDA", 0x90, formR},
-	{"STO", 0xA0, formR},
-	{"UNP", 0xB0, formR},
-	{"OUT", 0xC0, formR},
-	{"SUB", 0xD0, formR},
-	{"ADD", 0xE0, formR},
+	{"NOP", opNOP, formNone},
+	{"CLR", opCLR, formNone},
+	{"DEC", opDEC, formNone},
+	{"INC", opINC, formNone},
+	{"INA", opINA, formNone},
+	{"SIG", opSIG, formNone},
+	{"RET", opRET, formNone},
+	{"RND", opRND, formNone},
+	{"MOV", opMOV, formNone},
+	{"OTA", opOTA, formNone},
+	{"HLT", opHLT, formNone},
+	{"BDB", opBDB, formNN},
+	{"BDC", opBDC, formNN},
+	{"GTO", opGTO, formNN},
+	{"BRZ", opBRZ, formNN},
+	{"GTS", opGTS, formNN},
+	{"BNE", opBNE, formRNN},
+	{"BEQ", opBEQ, formRNN},
+	{"BGT", opBGT, formRNN},
+	{"BLS", opBLS, formRNN},
+	{"LDV", opLDV, formRNN},
+	{"INP", opINP, formR},
+	{"PAK", opPAK, formR},
+	{"LDA", opLDA, formR},
+	{"STO", opSTO, formR},
+	{"UNP", opUNP, formR},
+	{"OUT", opOUT, formR},
+	{"SUB", opSUB, formR},
+	{"ADD", opADD, formR},
 }
 
 var opByMnemonic = func() map[string]opInfo {
@@ -64,37 +106,37 @@ var opByMnemonic = func() map[string]opInfo {
 	return m
 }()
 
-// decode returns the instruction descriptor for an opcode byte.
-func decode(op byte) (opInfo, bool) {
+// opByCode maps every byte to its instruction. Undefined opcodes have an
+// empty mnemonic.
+var opByCode = func() (m [256]opInfo) {
 	for _, o := range opTable {
 		switch o.form {
 		case formNone, formNN:
-			if op == o.op {
-				return o, true
-			}
+			m[o.op] = o
 		case formR, formRNN:
-			if op&0xF0 == o.op {
-				return o, true
+			for r := byte(0); r < 16; r++ {
+				m[o.op|r] = o
 			}
 		}
 	}
-	return opInfo{}, false
-}
+	return m
+}()
 
-// InstrLen is the number of bytes (program steps) an opcode occupies.
-func InstrLen(op byte) int {
-	o, ok := decode(op)
-	if ok && (o.form == formNN || o.form == formRNN) {
-		return 2
-	}
-	return 1
+// decode returns the instruction descriptor for an opcode byte.
+func decode(op byte) (opInfo, bool) {
+	o := opByCode[op]
+	return o, o.mnemonic != ""
 }
 
 // Disassemble renders the instruction at step in assembler notation and
-// returns its length in steps. Unknown opcodes render as "??", followed
-// by the letter when the byte is a letter's character code (message data).
+// returns the number of steps it occupies from step onward. A two-byte
+// instruction at step 99 takes its operand from step 00, which a listing
+// shows on a line of its own, so it counts as one step. Unknown opcodes
+// render as "??", followed by the letter when the byte is a letter's
+// character code (message data).
 func Disassemble(mem *[Steps]byte, step int) (string, int) {
-	op := mem[step%Steps]
+	step %= Steps
+	op := mem[step]
 	o, ok := decode(op)
 	if !ok {
 		if r, ok := codeLetters[op]; ok {
@@ -104,15 +146,16 @@ func Disassemble(mem *[Steps]byte, step int) (string, int) {
 	}
 	nn := mem[(step+1)%Steps]
 	r := op & 0x0F
+	n := min(o.size(), Steps-step)
 	switch o.form {
 	case formR:
-		return fmt.Sprintf("%s.%X", o.mnemonic, r), 1
+		return fmt.Sprintf("%s.%X", o.mnemonic, r), n
 	case formNN:
-		return fmt.Sprintf("%s.%02X", o.mnemonic, nn), 2
+		return fmt.Sprintf("%s.%02X", o.mnemonic, nn), n
 	case formRNN:
-		return fmt.Sprintf("%s.%X.%02X", o.mnemonic, r, nn), 2
+		return fmt.Sprintf("%s.%X.%02X", o.mnemonic, r, nn), n
 	}
-	return o.mnemonic, 1
+	return o.mnemonic, n
 }
 
 // Assemble converts one assembler statement such as "LDV.B.00" into
@@ -179,7 +222,7 @@ func Assemble(src string) ([]byte, error) {
 			return nil, err
 		}
 		operand := step
-		if o.mnemonic == "LDV" {
+		if o.op == opLDV {
 			operand = val
 		}
 		n, err := operand(parts[2])

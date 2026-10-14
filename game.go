@@ -1,20 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"errors"
-	"fmt"
-	"image/color"
-	"io/fs"
 	"math"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"odyssey9/machine"
 )
@@ -28,8 +19,38 @@ const (
 	monitorW = 300
 )
 
+// Timings and positions used in several places.
+const (
+	keyLitFrames = 8               // frames a pressed key is drawn pressed
+	toastTime    = 4 * time.Second // how long a message stays up
+	confirmTime  = 4 * time.Second // how soon an action must be repeated to confirm it
+	buttonY      = 420             // top of the row of buttons under the TV
+)
+
+// panel is the panel drawn over the window, if any.
+type panel string
+
+const (
+	noPanel       panel = ""
+	helpPanel     panel = "help"
+	programsPanel panel = "programs"
+)
+
+// buttonID names a button under the TV. It is also the button's label.
+type buttonID string
+
+const (
+	powerButton    buttonID = "POWER"
+	speedButton    buttonID = "SPEED"
+	programsButton buttonID = "PROGRAMS"
+	saveButton     buttonID = "SAVE"
+	loadButton     buttonID = "LOAD"
+	monitorButton  buttonID = "MONITOR"
+	helpButton     buttonID = "HELP"
+)
+
 type button struct {
-	id         string
+	id         buttonID
 	x, y, w, h float32
 }
 
@@ -39,8 +60,8 @@ type game struct {
 	file     string
 	scale    float32 // render pixels per logical unit
 	monitor  bool
-	colors   bool   // colour characters like the manual's symbol chart
-	overlay  string // "", "help", "programs"
+	colors   bool  // colour characters like the manual's symbol chart
+	overlay  panel // drawn over the window
 	toast    string
 	toastFor time.Duration
 	clean    [machine.Steps]byte // the program as last saved or loaded
@@ -66,12 +87,12 @@ func newGame(m *machine.Machine, file string, sound bool) *game {
 	g.clean = m.Mem
 	g.snd = newAudio(sound)
 	x := float32(20)
-	for _, id := range []string{"POWER", "SPEED", "PROGRAMS", "SAVE", "LOAD", "MONITOR", "HELP"} {
+	for _, id := range []buttonID{powerButton, speedButton, programsButton, saveButton, loadButton, monitorButton, helpButton} {
 		w := float32(92)
-		if id == "SPEED" {
+		if id == speedButton {
 			w = 136
 		}
-		g.buttons = append(g.buttons, button{id, x, 420, w, 32})
+		g.buttons = append(g.buttons, button{id, x, buttonY, w, 32})
 		x += w + 12
 	}
 	return g
@@ -116,7 +137,7 @@ func (g *game) LayoutF(outsideW, outsideH float64) (float64, float64) {
 }
 
 func (g *game) showToast(s string) {
-	g.toast, g.toastFor = s, 4*time.Second
+	g.toast, g.toastFor = s, toastTime
 }
 
 // unsaved reports whether program memory holds work that would be lost if
@@ -132,13 +153,13 @@ func (g *game) confirm(action, prompt string) bool {
 		g.pending = ""
 		return true
 	}
-	g.pending, g.pendFor = action, 4*time.Second
+	g.pending, g.pendFor = action, confirmTime
 	g.showToast(prompt)
 	return false
 }
 
 func (g *game) press(k machine.Key) {
-	g.keyLit[k] = 8
+	g.keyLit[k] = keyLitFrames
 	if !g.power {
 		return
 	}
@@ -178,28 +199,7 @@ func (g *game) Update() error {
 	g.handleShortcuts()
 	g.handleMouse()
 	g.handleDrops()
-
-	if g.overlay == "" {
-		keys, bs, held := pollKeyboard()
-		for _, k := range keys {
-			g.press(k)
-		}
-		if bs && g.power {
-			if g.m.Mode() == machine.ModeInput {
-				g.m.Backspace()
-			} else if !held { // only erasing repeats, not CLEAR
-				g.press(machine.KeyClear)
-			}
-		}
-	} else if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		g.overlay = ""
-	} else if g.overlay == "programs" {
-		for _, r := range ebiten.AppendInputChars(nil) {
-			if i := strings.IndexRune("123456789abcdef", unicode.ToLower(r)); i >= 0 && i < len(machine.Samples) {
-				g.loadSample(i)
-			}
-		}
-	}
+	g.handleKeys()
 
 	if g.power {
 		g.m.Update(dt)
@@ -210,34 +210,11 @@ func (g *game) Update() error {
 	return nil
 }
 
-func (g *game) handleShortcuts() {
-	for _, k := range inpututil.AppendJustPressedKeys(nil) {
-		switch k {
-		case ebiten.KeyF1:
-			g.toggleOverlay("help")
-		case ebiten.KeyF2:
-			g.save()
-		case ebiten.KeyF3:
-			g.load()
-		case ebiten.KeyF4:
-			g.toggleOverlay("programs")
-		case ebiten.KeyF5:
-			g.m.SetSpeed((g.m.Speed() + 1) % len(machine.Speeds))
-		case ebiten.KeyF6:
-			g.toggleMonitor()
-		case ebiten.KeyF7:
-			g.colors = !g.colors
-		case ebiten.KeyF8:
-			g.togglePower()
-		}
-	}
-}
-
-func (g *game) toggleOverlay(name string) {
-	if g.overlay == name {
-		g.overlay = ""
+func (g *game) toggleOverlay(p panel) {
+	if g.overlay == p {
+		g.overlay = noPanel
 	} else {
-		g.overlay = name
+		g.overlay = p
 	}
 }
 
@@ -255,486 +232,4 @@ func (g *game) togglePower() {
 	}
 	g.power = !g.power
 	g.m.PowerOn() // switching off erases the program, as on the real console
-}
-
-func (g *game) cursor() (float32, float32) {
-	x, y := ebiten.CursorPosition()
-	return float32(x) / g.scale, float32(y) / g.scale
-}
-
-func (g *game) handleMouse() {
-	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-		g.mouseKey = machine.KeyNone
-	}
-	if !inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		return
-	}
-	x, y := g.cursor()
-	if g.overlay == "programs" {
-		if i := g.sampleAt(x, y); i >= 0 {
-			g.loadSample(i)
-			return
-		}
-	}
-	if g.overlay != "" {
-		g.overlay = ""
-		return
-	}
-	for _, b := range g.buttons {
-		if x >= b.x && x < b.x+b.w && y >= b.y && y < b.y+b.h {
-			g.clickButton(b.id)
-			return
-		}
-	}
-	if k := keyAt(x, y); k != machine.KeyNone {
-		g.mouseKey = k
-		g.press(k)
-	}
-}
-
-func (g *game) clickButton(id string) {
-	switch id {
-	case "POWER":
-		g.togglePower()
-	case "SPEED":
-		g.m.SetSpeed((g.m.Speed() + 1) % len(machine.Speeds))
-	case "PROGRAMS":
-		g.toggleOverlay("programs")
-	case "SAVE":
-		g.save()
-	case "LOAD":
-		g.load()
-	case "MONITOR":
-		g.toggleMonitor()
-	case "HELP":
-		g.toggleOverlay("help")
-	}
-}
-
-func (g *game) handleDrops() {
-	files := ebiten.DroppedFiles()
-	if files == nil {
-		return
-	}
-	entries, err := fs.ReadDir(files, ".")
-	if err != nil || len(entries) == 0 {
-		return
-	}
-	name := entries[0].Name()
-	data, err := fs.ReadFile(files, name)
-	if err != nil {
-		g.showToast("Cannot read " + name)
-		return
-	}
-	g.loadBytes(name, data, "drop:"+name, "Drop "+name+" again to replace your unsaved program")
-}
-
-// loadBytes loads a listing. If that would replace an unsaved program, the
-// user must first repeat the action, which is named by action and prompt.
-func (g *game) loadBytes(name string, data []byte, action, prompt string) {
-	p, err := machine.ParseProgram(bytes.NewReader(data))
-	if err != nil {
-		g.showToast(name + ": " + err.Error())
-		return
-	}
-	if !g.replace(p, action, prompt) {
-		return
-	}
-	g.showToast("Loaded " + name + " — press E to execute")
-}
-
-// replace puts program p into memory, unless that would lose an unsaved
-// program and the user hasn't confirmed it yet.
-func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
-	if g.unsaved() && *p != g.m.Mem && !g.confirm(action, prompt) {
-		return false
-	}
-	g.power = true
-	g.m.LoadProgram(p)
-	g.clean = *p
-	return true
-}
-
-func (g *game) save() {
-	// Saving over a file that holds a different program needs confirming.
-	if old, err := os.ReadFile(g.file); err == nil {
-		p, err := machine.ParseProgram(bytes.NewReader(old))
-		if (err != nil || *p != g.m.Mem) &&
-			!g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
-			return
-		}
-	}
-	var buf bytes.Buffer
-	machine.FormatProgram(&buf, "Saved "+time.Now().Format("2006-01-02 15:04"), &g.m.Mem)
-	if err := writeFileAtomic(g.file, buf.Bytes()); err != nil {
-		g.showToast("Save failed: " + err.Error())
-		return
-	}
-	g.clean = g.m.Mem
-	g.showToast("Saved to " + g.file)
-}
-
-// writeFileAtomic writes data to a temporary file next to name and then
-// renames it, so a crash part-way through never leaves name truncated.
-func writeFileAtomic(name string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(f.Name(), 0o644)
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), name)
-	}
-	if err != nil {
-		os.Remove(f.Name())
-	}
-	return err
-}
-
-func (g *game) load() {
-	data, err := os.ReadFile(g.file)
-	if err != nil {
-		g.showToast("Load failed: " + err.Error())
-		return
-	}
-	g.loadBytes(g.file, data, "load", "Press LOAD again to replace your unsaved program")
-}
-
-func (g *game) loadSample(i int) {
-	s := machine.Samples[i]
-	if !g.replace(s.Program(), fmt.Sprint("sample:", i), "Choose "+s.Name+" again to replace your unsaved program") {
-		return
-	}
-	g.overlay = ""
-	g.showToast(s.Name + " loaded. " + s.Usage)
-}
-
-// ---------------------------------------------------------------------------
-// Drawing
-
-// charColor follows the colours of the "Computer Symbols" chart in the
-// manual, which shade from purple through green and yellow to red.
-func charColor(code byte) color.RGBA {
-	palette := []uint32{0xC266DA, 0x9DB894, 0x52D163, 0xB2E23F, 0xF5C836, 0xF7613A, 0xEE3E45, 0xEE4580, 0xEE58B4}
-	i := int(code) / 7
-	if i >= len(palette) {
-		i = len(palette) - 1
-	}
-	return rgb(palette[i])
-}
-
-const (
-	tvX, tvY, tvW, tvH = 20, 16, 780, 388
-	scrX, scrY         = 58, 40
-	scrW, scrH         = 704, 300
-)
-
-func (g *game) Draw(screen *ebiten.Image) {
-	c := canvas{screen, g.scale}
-	screen.Fill(rgb(0x2A2622))
-	g.drawTV(c)
-	g.drawButtons(c)
-	g.drawKeyboard(c)
-	if g.monitor {
-		g.drawMonitor(c)
-	}
-	switch g.overlay {
-	case "help":
-		g.drawHelp(c)
-	case "programs":
-		g.drawPrograms(c)
-	}
-	g.drawToast(c)
-	if g.shotNow {
-		g.shotNow = false
-		g.takeScreenshot(screen)
-	}
-}
-
-func (g *game) drawTV(c canvas) {
-	// cabinet and bezel
-	c.rrect(tvX, tvY, tvW, tvH, 18, rgb(0x161412))
-	c.rrect(tvX+8, tvY+8, tvW-16, tvH-16, 14, rgb(0x3B3631))
-	c.rrect(scrX-10, scrY-10, scrW+20, scrH+20, 26, rgb(0x0C0B0A))
-	bg := rgb(0x0A0F24)
-	if !g.power {
-		bg = rgb(0x060606)
-	}
-	c.rrect(scrX, scrY, scrW, scrH, 22, bg)
-
-	if g.power {
-		// The 11 output positions.
-		const px, py = 7, 9
-		const pitch = 62
-		x0 := float32(scrX) + (scrW-(machine.Positions*pitch-6))/2
-		y0 := float32(scrY + 70)
-		for i, code := range g.m.Screen {
-			x := x0 + float32(i)*pitch
-			col := rgb(0xE6ECFF)
-			if g.colors {
-				col = charColor(code)
-			}
-			glow := color.RGBA{col.R / 5, col.G / 5, col.B / 5, 0x33}
-			c.glyph(code, x-1.5, y0-1.5, px+3.0/8, py+3.0/7, glow)
-			c.glyph(code, x, y0, px, py, col)
-			c.text(fmt.Sprintf("%02X", i), fontMono, 10, x+28, y0+82, rgba(0x6C7AB0, 0x90), 0)
-		}
-
-		// The status line in the same character set.
-		status := g.m.Status()
-		const spx, spy, spitch = 3, 4, 28
-		sx := float32(scrX) + (scrW-machine.StatusWidth*spitch)/2
-		sy := float32(scrY + 205)
-		codes := machine.TextCodes(status)
-		for i, code := range codes {
-			if i >= machine.StatusWidth {
-				break
-			}
-			c.glyph(code, sx+float32(i)*spitch, sy, spx, spy, rgb(0xA9B8E8))
-		}
-		// blinking cursor while typing in Input mode
-		if g.m.Mode() == machine.ModeInput && g.frame/20%2 == 0 && len(codes) < machine.StatusWidth {
-			c.glyph(0x2F, sx+float32(len(codes))*spitch, sy, spx, spy, rgba(0xE8ECFF, 0xA0))
-		}
-	}
-
-	// scan lines
-	for y := float32(scrY + 2); y < scrY+scrH-2; y += 3 {
-		c.rect(scrX+4, y, scrW-8, 1, color.RGBA{0, 0, 0, 0x30})
-	}
-
-	// nameplate and power light
-	c.text("ODYSSEY²", fontBold, 15, tvX+40, tvY+tvH-22, rgb(0xD8D2C4), -1)
-	c.text("COMPUTER INTRO!  ·  VIDEOPAC 9", fontRegular, 12, tvX+140, tvY+tvH-22, rgb(0x9C958A), -1)
-	led := rgb(0x401010)
-	if g.power {
-		led = rgb(0xFF3030)
-	}
-	c.circle(tvX+tvW-44, tvY+tvH-22, 6, led)
-	c.text(machine.Speeds[g.m.Speed()].Name, fontMono, 11, tvX+tvW-60, tvY+tvH-22, rgb(0x9C958A), 1)
-}
-
-// drawToast shows the current message at the bottom of the TV screen, or
-// under an open panel. A message too long to fit loses its middle, so the
-// end of a file name stays readable.
-func (g *game) drawToast(c canvas) {
-	if g.toastFor <= 0 || g.toast == "" {
-		return
-	}
-	const maxW = scrW - 20
-	text := g.toast
-	for r := []rune(text); c.textWidth(text, fontRegular, 13)+24 > maxW && len(r) > 1; {
-		mid := len(r) / 2
-		r = append(r[:mid], r[mid+1:]...)
-		text = string(r[:mid]) + "…" + string(r[mid:])
-	}
-	w := c.textWidth(text, fontRegular, 13) + 24
-	x, y := float32(scrX)+(scrW-w)/2, float32(scrY+scrH-38)
-	if g.overlay != "" {
-		x, y = (baseW-w)/2, baseH-46
-	}
-	c.rrect(x, y, w, 26, 8, rgba(0x000000, 0xD0))
-	c.text(text, fontRegular, 13, x+w/2, y+13, rgb(0xFFFFFF), 0)
-}
-
-func (g *game) drawButtons(c canvas) {
-	for _, b := range g.buttons {
-		label := b.id
-		on := false
-		switch b.id {
-		case "POWER":
-			on = g.power
-		case "SPEED":
-			label = "SPEED: " + machine.Speeds[g.m.Speed()].Name
-		case "MONITOR":
-			on = g.monitor
-		case "PROGRAMS":
-			on = g.overlay == "programs"
-		case "HELP":
-			on = g.overlay == "help"
-		}
-		face := rgb(0x4A443D)
-		if on {
-			face = rgb(0x6E655A)
-		}
-		c.rrect(b.x, b.y, b.w, b.h, 6, rgb(0x14120F))
-		c.rrect(b.x+1, b.y+1, b.w-2, b.h-3, 5, face)
-		ink := rgb(0xEDE6D8)
-		if b.id == "POWER" && g.power {
-			ink = rgb(0xFF7060)
-		}
-		c.text(label, fontBold, 12, b.x+b.w/2, b.y+b.h/2, ink, 0)
-	}
-}
-
-// listing returns instruction start steps, decoding from step 00.
-func listing(mem *[machine.Steps]byte) []int {
-	var starts []int
-	for s := 0; s < machine.Steps; {
-		starts = append(starts, s)
-		_, n := machine.Disassemble(mem, s)
-		s += n
-	}
-	return starts
-}
-
-func (g *game) drawMonitor(c canvas) {
-	x0 := float32(baseW)
-	c.rect(x0, 0, monitorW, baseH, rgb(0x15171C))
-	c.rect(x0, 0, 2, baseH, rgb(0x2E323B))
-	m := g.m
-	dim, ink, hi := rgb(0x7D8596), rgb(0xD6DBE6), rgb(0xFFD25A)
-	y := float32(24)
-	c.text("MONITOR", fontBold, 14, x0+20, y, ink, -1)
-	c.text(m.Mode().String(), fontMono, 12, x0+monitorW-20, y, hi, 1)
-	y += 30
-	c.text(fmt.Sprintf("ACCUM %02X   PC %02d   SUBR %02d", m.A, m.PC, m.S), fontMono, 13, x0+20, y, ink, -1)
-	y += 26
-	for r := 0; r < 16; r++ {
-		cx := x0 + 20 + float32(r%4)*68
-		cy := y + float32(r/4)*20
-		col := ink
-		if r == machine.RegB {
-			col = rgb(0x8FD3FF)
-		}
-		c.text(fmt.Sprintf("R%X %02X", r, m.R[r]), fontMono, 13, cx, cy, col, -1)
-	}
-	y += 4*20 + 14
-	c.rect(x0+16, y, monitorW-32, 1, rgb(0x2E323B))
-	y += 16
-
-	focus := m.PC
-	label := "PC"
-	if m.WaitingForKey() {
-		focus = (m.PC + machine.Steps - 1) % machine.Steps // the INP/INA being executed
-	}
-	switch m.Mode() {
-	case machine.ModeInput, machine.ModeRoll, machine.ModeProgram, machine.ModeAssembler, machine.ModeHex:
-		focus, label = m.EditStep(), "STEP"
-	}
-	c.text("PROGRAM  (> "+label+")", fontBold, 12, x0+20, y, dim, -1)
-	y += 20
-	starts := listing(&m.Mem)
-	idx := 0
-	for i, s := range starts {
-		if s <= focus {
-			idx = i
-		}
-	}
-	const lines = 30
-	first := idx - lines/2
-	if first > len(starts)-lines {
-		first = len(starts) - lines
-	}
-	if first < 0 {
-		first = 0
-	}
-	for i := first; i < first+lines && i < len(starts); i++ {
-		s := starts[i]
-		text, n := machine.Disassemble(&m.Mem, s)
-		hex := fmt.Sprintf("%02X", m.Mem[s])
-		if n == 2 && s+1 < machine.Steps {
-			hex += fmt.Sprintf(" %02X", m.Mem[s+1])
-		}
-		col := dim
-		if m.Mem[s] != 0 || (n == 2 && s+1 < machine.Steps && m.Mem[s+1] != 0) {
-			col = ink
-		}
-		mark := " "
-		if i == idx {
-			mark = ">"
-			col = hi
-			c.rect(x0+12, y-9, monitorW-24, 18, rgb(0x2A2E38))
-		}
-		c.text(fmt.Sprintf("%s %02d  %-5s  %s", mark, s, hex, text), fontMono, 13, x0+18, y, col, -1)
-		y += 19
-	}
-}
-
-func (g *game) drawPanel(c canvas, title string, w, h float32) (float32, float32) {
-	c.rect(0, 0, g.logicalW(), baseH, rgba(0x000000, 0xB0))
-	x := (baseW - w) / 2
-	y := (baseH - h) / 2
-	c.rrect(x, y, w, h, 12, rgb(0xF4F1EA))
-	c.text(title, fontBold, 18, x+24, y+30, rgb(0x1A1A1A), -1)
-	c.text("Esc or click to close", fontRegular, 12, x+w-24, y+30, rgb(0x777066), 1)
-	return x, y
-}
-
-const progRowH = 38
-
-func (g *game) programRows() (x, y, w float32) {
-	w = 640
-	h := float32(70 + progRowH*len(machine.Samples))
-	return (baseW - w) / 2, (baseH-h)/2 + 56, w
-}
-
-func (g *game) sampleAt(mx, my float32) int {
-	x, y, w := g.programRows()
-	if mx < x || mx > x+w || my < y {
-		return -1
-	}
-	i := int((my - y) / progRowH)
-	if i < len(machine.Samples) {
-		return i
-	}
-	return -1
-}
-
-func (g *game) drawPrograms(c canvas) {
-	h := float32(70 + progRowH*len(machine.Samples))
-	g.drawPanel(c, "Programs from the manual", 640, h)
-	x, y, w := g.programRows()
-	mx, my := g.cursor()
-	hover := g.sampleAt(mx, my)
-	for i, s := range machine.Samples {
-		ry := y + float32(i)*progRowH
-		if i == hover {
-			c.rrect(x+12, ry, w-24, progRowH-4, 6, rgb(0xE2DCCD))
-		}
-		key := string("123456789ABCDEF"[i])
-		c.text(key, fontBold, 14, x+30, ry+progRowH/2-2, rgb(0xC0392B), 0)
-		c.text(s.Name, fontBold, 14, x+50, ry+12, rgb(0x1A1A1A), -1)
-		c.text(s.Usage, fontRegular, 12, x+50, ry+27, rgb(0x5A554C), -1)
-	}
-}
-
-var helpText = []string{
-	"OPERATING THE COMPUTER  (see the manual's back gatefold)",
-	"Power on shows SELECT GAME: press 1-4 for the built-in games",
-	"   1 Creepy Crawler   2 Flash Card   3 Computer Telepathy   4 Between the Sheets",
-	"RESET (▲) → COMMAND.   E execute · C continue after HLT · D display · P program",
-	"PROGRAM: A assembler or M hex (machine) → I input · R roll",
-	"INPUT: type an instruction (6B or LDV.B.00) and press ENTER.  CLEAR leaves.",
-	"ROLL: U / D step up / down, CLEAR returns to PROGRAM mode.",
-	"DISPLAY: 0-F registers · P program counter · S subroutine · X accumulator",
-	"",
-	"PC KEYBOARD",
-	"Letters, digits, . ? + - = type directly   * → ×   / → ÷   space → SPACE",
-	"[ → YES   ] → NO   Enter → ENTER   Delete → CLEAR   Esc → RESET",
-	"Backspace erases the last character while typing an instruction",
-	"",
-	"EMULATOR",
-	"F1 help · F2 save · F3 load · F4 programs · F5 speed · F6 monitor · F7 colours · F8 power",
-	"Save/Load use the file given by -file. Drop a listing on the window to load it.",
-	"Powering off erases the program, just like the real console.",
-}
-
-func (g *game) drawHelp(c canvas) {
-	h := float32(70 + 22*len(helpText))
-	x, y := g.drawPanel(c, "Help", 700, h)
-	for i, line := range helpText {
-		kind := fontRegular
-		col := rgb(0x2A2722)
-		if line == strings.ToUpper(line) && line != "" && !strings.HasPrefix(line, " ") {
-			kind, col = fontBold, rgb(0xC0392B)
-		}
-		c.text(line, kind, 13, x+24, y+64+float32(i)*22, col, -1)
-	}
 }

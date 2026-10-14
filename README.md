@@ -193,8 +193,13 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 
 | Path | Contents |
 |---|---|
-| `machine/` | the emulated computer, with no GUI code: CPU and modes (`machine.go`), assembler/disassembler and decimal arithmetic (`asm.go`), games, font, key codes, listing format, sample programs, tests |
-| `main.go`, `game.go` | window, TV, buttons, monitor panel, overlays |
+| `machine/` | the emulated computer, with no GUI code: CPU and modes (`machine.go`), the instruction table shared by the CPU and the assembler/disassembler, and decimal arithmetic (`asm.go`), games, font, key codes, listing format, sample programs, tests |
+| `main.go` | command-line options and start-up |
+| `game.go` | emulator state and the update loop |
+| `tv.go` | drawing the TV screen and the buttons under it |
+| `input.go` | function keys, mouse, typed keys and dropped files |
+| `files.go` | SAVE, LOAD and loading the manual's programs |
+| `monitor.go`, `panels.go` | the monitor panel, and the help and programs panels |
 | `keyboard.go` | on-screen keyboard and host keyboard mapping |
 | `audio.go` | sound synthesis |
 | `draw.go` | resolution-independent drawing helpers |
