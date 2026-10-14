@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,52 @@ func TestParseScriptErrors(t *testing.T) {
 			t.Errorf("%q parsed without error", bad)
 		}
 	}
+}
+
+// The help panel and the README are written by hand, so check that they
+// cover the keys the code actually handles.
+func TestKeyDocs(t *testing.T) {
+	readme := mustRead(t, "README.md")
+	readmePC := between(t, readme, "### PC keyboard", "### Emulator controls")
+	help := strings.Join(helpText, "\n")
+	helpPC := between(t, help, "PC KEYBOARD", "EMULATOR")
+
+	for k, id := range fnKeys {
+		if want := fmt.Sprintf("**%s (%s)**", id, k); !strings.Contains(readme, want) {
+			t.Errorf("README doesn't describe %s", want)
+		}
+		if want := fmt.Sprintf("%s %s", k, strings.ToLower(string(id))); !strings.Contains(help, want) {
+			t.Errorf("help doesn't mention %q", want)
+		}
+	}
+	if !strings.Contains(readme, "**F7** colours") || !strings.Contains(help, "F7 colours") {
+		t.Errorf("README or help doesn't describe F7")
+	}
+
+	for r := range typedKeys {
+		inReadme, inHelp := fmt.Sprintf("`%c`", r), string(r)
+		if r == ' ' {
+			inReadme, inHelp = "space", "space"
+		}
+		if !strings.Contains(readmePC, inReadme) {
+			t.Errorf("README's PC keyboard table doesn't mention %s", inReadme)
+		}
+		if !strings.Contains(helpPC, inHelp) {
+			t.Errorf("help's PC keyboard lines don't mention %q", inHelp)
+		}
+	}
+}
+
+// between returns the part of s from the line starting with from up to the
+// line starting with to.
+func between(t *testing.T, s, from, to string) string {
+	t.Helper()
+	i := strings.Index(s, from)
+	j := strings.Index(s, to)
+	if i < 0 || j < i {
+		t.Fatalf("can't find the section from %q to %q", from, to)
+	}
+	return s[i:j]
 }
 
 func mustRead(t *testing.T, name string) string {

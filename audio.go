@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"math"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +24,10 @@ type tone struct {
 	lfsr  uint32
 	noise float64
 	nextN float64
+
+	// The player closes itself when garbage collected, so the stream keeps
+	// a reference to it for as long as the game holds the stream.
+	player *audio.Player
 }
 
 func (s *tone) Read(p []byte) (int, error) {
@@ -94,7 +100,8 @@ func (s *tone) wave() (v, target float64) {
 	return 0, 0
 }
 
-// newAudio starts the sound output. It returns nil if audio is disabled.
+// newAudio starts the sound output. It returns nil, and the emulator runs
+// silently, if audio is disabled or the player can't be created.
 func newAudio(enabled bool) *tone {
 	if !enabled {
 		return nil
@@ -103,16 +110,14 @@ func newAudio(enabled bool) *tone {
 	t := &tone{}
 	p, err := ctx.NewPlayer(t)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "No sound:", err)
 		return nil
 	}
 	p.SetBufferSize(40 * time.Millisecond)
 	p.Play()
-	keepAlive = p
+	t.player = p
 	return t
 }
-
-// keepAlive stops the player from being garbage collected.
-var keepAlive *audio.Player
 
 func (s *tone) set(snd machine.Sound) {
 	if s != nil {
