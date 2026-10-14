@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -42,7 +43,7 @@ func TestKeysTypedTogetherKeepASafeOrder(t *testing.T) {
 	tick(g)
 	// ENTER and the next digit typed within one tick
 	var kb hostKeyboard
-	for _, k := range kb.next([]rune{'0'}, []ebiten.Key{ebiten.KeyEnter, ebiten.KeyDigit0}, 0) {
+	for _, k := range kb.next(keyTick{chars: "0", pressed: []ebiten.Key{ebiten.KeyEnter, ebiten.KeyDigit0}}.input()) {
 		g.press(k.k)
 	}
 	tick(g)
@@ -54,100 +55,154 @@ func TestKeysTypedTogetherKeepASafeOrder(t *testing.T) {
 	}
 }
 
-// hostInput is one tick of host keyboard input.
-type hostInput struct {
-	chars   string
-	pressed []ebiten.Key
+// keyTick is one tick of host keyboard input.
+type keyTick struct {
+	chars     string
+	pressed   []ebiten.Key // keys just pressed
+	held      []ebiten.Key // keys held down since an earlier tick
+	sameFrame bool         // in the same frame as the tick before, so no new input
 }
 
-// typed returns the keys a hostKeyboard makes of the ticks of input in,
-// and which of them are repeats.
-func typed(in ...hostInput) (keys []machine.Key, repeats []bool) {
+func (k keyTick) input() keyInput {
+	return keyInput{
+		chars:   []rune(k.chars),
+		pressed: k.pressed,
+		down:    append(slices.Clone(k.held), k.pressed...),
+		newPoll: !k.sameFrame,
+	}
+}
+
+// typed returns the keys a hostKeyboard makes of ticks, and which of them
+// are repeats.
+func typed(ticks ...keyTick) (keys []machine.Key, repeats []bool) {
 	var kb hostKeyboard
-	for _, i := range in {
-		for _, k := range kb.next([]rune(i.chars), i.pressed, 0) {
-			keys, repeats = append(keys, k.k), append(repeats, k.repeat)
+	for _, k := range ticks {
+		for _, hk := range kb.next(k.input()) {
+			keys, repeats = append(keys, hk.k), append(repeats, hk.repeat)
 		}
 	}
 	return keys, repeats
 }
 
-// With an input method, a key's character comes a tick after the key is
-// pressed, so it can come with, or after, an Enter pressed after it. It
-// must still come first.
-func TestLateCharacterComesBeforeEnter(t *testing.T) {
-	five, enter := []ebiten.Key{ebiten.KeyDigit5}, []ebiten.Key{ebiten.KeyEnter}
-	want := []machine.Key{machine.Key5, machine.KeyEnter}
-	for _, in := range [][]hostInput{
-		{{"", five}, {"5", enter}},
-		{{"", five}, {"", enter}, {"5", nil}},
+var (
+	keyD     = []ebiten.Key{ebiten.KeyD}
+	keyE     = []ebiten.Key{ebiten.KeyE}
+	keyEnter = []ebiten.Key{ebiten.KeyEnter}
+	key5     = []ebiten.Key{ebiten.KeyDigit5}
+	sameTick = keyTick{sameFrame: true}
+)
+
+// With an input method, a key's character comes the next time Ebitengine
+// reads the system's input, which can be several ticks later, and after
+// Enter has been pressed. It must still come before Enter. A character
+// typed in the same tick as Esc or Delete comes before them.
+func TestLateCharacterKeepsItsPlace(t *testing.T) {
+	esc := []ebiten.Key{ebiten.KeyEscape, ebiten.KeyE}
+	for _, c := range []struct {
+		ticks []keyTick
+		want  []machine.Key
+	}{
+		{[]keyTick{{pressed: key5}, {chars: "5", pressed: keyEnter}}, []machine.Key{machine.Key5, machine.KeyEnter}},
+		{[]keyTick{{pressed: key5}, {pressed: keyEnter}, {chars: "5"}}, []machine.Key{machine.Key5, machine.KeyEnter}},
+		// three ticks a frame, as at 20 frames a second
+		{[]keyTick{{pressed: key5}, sameTick, sameTick, {pressed: keyEnter}, sameTick, sameTick, {chars: "5"}},
+			[]machine.Key{machine.Key5, machine.KeyEnter}},
+		{[]keyTick{{chars: "E", pressed: esc}}, []machine.Key{machine.KeyE, machine.KeyReset}},
+		{[]keyTick{{pressed: esc}, {chars: "E"}}, []machine.Key{machine.KeyE, machine.KeyReset}},
 	} {
-		if got, _ := typed(in...); !slices.Equal(got, want) {
-			t.Errorf("%v: typed %v, want %v", in, got, want)
+		if got, _ := typed(c.ticks...); !slices.Equal(got, c.want) {
+			t.Errorf("%+v: typed %v, want %v", c.ticks, got, c.want)
 		}
 	}
 	// A key that types nothing, such as a dead key, holds Enter up only
-	// briefly.
-	var kb hostKeyboard
-	kb.next(nil, five, 0)
-	for i := range charWait {
-		if got := kb.next(nil, nil, 0); len(got) > 0 {
-			return
+	// until the input after next.
+	for _, frame := range []int{1, 3} {
+		ticks := []keyTick{{pressed: key5}, {pressed: keyEnter}}
+		for range charPolls * frame {
+			ticks = append(ticks, keyTick{sameFrame: len(ticks)%frame != 0})
 		}
-		if i == 0 {
-			kb.next(nil, enter, 0)
+		if got, _ := typed(ticks...); !slices.Equal(got, []machine.Key{machine.KeyEnter}) {
+			t.Errorf("%d ticks a frame: Enter after a key that typed nothing: typed %v", frame, got)
 		}
 	}
-	t.Errorf("Enter held up for %d ticks by a key that typed nothing", charWait)
 }
 
-// A held key's character repeating is told apart from the key's press,
-// even when the press's character comes late.
+// A held key repeating is told apart from presses, even when a press's
+// character comes late, or another key's press comes in the same tick.
 func TestRepeatsToldApart(t *testing.T) {
-	a := []ebiten.Key{ebiten.KeyA}
-	for _, in := range [][]hostInput{
-		{{"A", a}, {"A", nil}},
-		{{"", a}, {"A", nil}, {"A", nil}},
+	for _, c := range []struct {
+		ticks []keyTick
+		want  []bool
+	}{
+		{[]keyTick{{chars: "E", pressed: keyE}, {chars: "E", held: keyE}}, []bool{false, true}},
+		{[]keyTick{{pressed: keyE}, {chars: "E", held: keyE}, {chars: "E", held: keyE}}, []bool{false, true}},
+		// D pressed while E repeats
+		{[]keyTick{{chars: "E", pressed: keyE}, {chars: "E", held: keyE}, {chars: "ED", pressed: keyD, held: keyE}},
+			[]bool{false, true, true, false}},
+		{[]keyTick{{chars: "E", pressed: keyE}, {chars: "E", held: keyE}, {chars: "E", pressed: keyD, held: keyE}, {chars: "D", held: keyD}},
+			[]bool{false, true, true, false}},
+		// E pressed again, its character late
+		{[]keyTick{{chars: "E", pressed: keyE}, {}, {pressed: keyE}, {chars: "E", held: keyE}}, []bool{false, false}},
+		// a key's last repeat, read with its release
+		{[]keyTick{{chars: "E", pressed: keyE}, {chars: "E", held: keyE}, {chars: "E"}}, []bool{false, true, true}},
+		// two keys pressed in one tick, the second held
+		{[]keyTick{{chars: "ED", pressed: []ebiten.Key{ebiten.KeyD, ebiten.KeyE}}, {chars: "D", held: keyD}},
+			[]bool{false, false, true}},
+		// Shift let go while E repeats
+		{[]keyTick{{chars: "E", pressed: keyE, held: []ebiten.Key{ebiten.KeyShiftLeft}}, {chars: "E", held: keyE}, {chars: "e", held: keyE}},
+			[]bool{false, true, true}},
+		// 2 pressed while 1 repeats, the last repeat coming late with 2's character
+		{[]keyTick{{chars: "1", pressed: []ebiten.Key{ebiten.KeyDigit1}}, {chars: "1", held: []ebiten.Key{ebiten.KeyDigit1}},
+			{pressed: []ebiten.Key{ebiten.KeyDigit2}}, {chars: "12", held: []ebiten.Key{ebiten.KeyDigit2}}},
+			[]bool{false, true, true, false}},
+		// a key Ebitengine doesn't know types a character too
+		{[]keyTick{{chars: "?"}}, []bool{false}},
 	} {
-		if _, got := typed(in...); !slices.Equal(got, []bool{false, true}) {
-			t.Errorf("%v: repeats %v, want [false true]", in, got)
+		if _, got := typed(c.ticks...); !slices.Equal(got, c.want) {
+			t.Errorf("%+v: repeats %v, want %v", c.ticks, got, c.want)
 		}
 	}
+}
+
+// typeHost types one tick of host keyboard input.
+func (g *game) typeHost(k keyTick) {
+	g.typeHostKeys(g.kb.next(k.input()))
 }
 
 // With an input method, the PROGRAMS panel still takes a program's key,
-// whose character comes a tick after its press.
+// whose character comes after its press.
 func TestProgramsPanelTakesLateCharacter(t *testing.T) {
 	g := testGame(t)
 	g.overlay = programsPanel
-	g.typeHostKeys(g.kb.next(nil, []ebiten.Key{ebiten.KeyDigit3}, 0))
-	g.typeHostKeys(g.kb.next([]rune{'3'}, nil, 0))
+	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyDigit3}})
+	g.typeHost(sameTick)
+	g.typeHost(keyTick{chars: "3", held: []ebiten.Key{ebiten.KeyDigit3}})
 	if want := machine.Samples[2]; g.m.Mem != *want.Program() || g.overlay != noPanel {
 		t.Errorf("3 in the PROGRAMS panel didn't load %s and close the panel", want.Name)
 	}
 }
 
 // A program's key held down in the PROGRAMS panel doesn't confirm the
-// choice by repeating, nor type at the console once it has loaded the
-// program.
+// choice by repeating, even with another key's press, nor type at the
+// console once it has loaded the program.
 func TestHeldKeyStaysInPanel(t *testing.T) {
 	g := testGame(t)
 	typeStep(g, machine.Key0, machine.Key8)
-	e := []ebiten.Key{ebiten.KeyE}
 	g.overlay = programsPanel
-	hold := func() {
+	hold := func(held []ebiten.Key) {
 		for range 10 {
-			g.typeHostKeys(g.kb.next([]rune{'E'}, nil, 0))
+			g.typeHost(keyTick{chars: "E", held: held})
 			tick(g)
 		}
 	}
-	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
-	hold()
+	g.typeHost(keyTick{chars: "E", pressed: keyE})
+	hold(keyE)
+	g.typeHost(keyTick{chars: "EG", pressed: []ebiten.Key{ebiten.KeyG}, held: keyE})
 	if !g.unsaved() || g.overlay != programsPanel {
 		t.Fatal("E held down replaced an unsaved program without a second press")
 	}
-	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
-	hold()
+	g.typeHost(keyTick{chars: "E", pressed: keyE})
+	hold(keyE)
 	want := machine.Samples[strings.IndexByte(sampleKeys, 'E')]
 	if g.m.Mem != *want.Program() || g.overlay != noPanel {
 		t.Fatalf("second E didn't load %s", want.Name)
@@ -155,10 +210,22 @@ func TestHeldKeyStaysInPanel(t *testing.T) {
 	if g.m.Mode() != machine.ModeCommand || len(g.keys) > 0 {
 		t.Errorf("E held down typed at the console: mode %v, %d keys queued", g.m.Mode(), len(g.keys))
 	}
-	g.typeHostKeys(g.kb.next([]rune{'E'}, e, 0))
-	g.typeHostKeys(g.kb.next([]rune{'E'}, nil, 0))
+	g.typeHost(keyTick{chars: "E", pressed: keyE})
+	g.typeHost(keyTick{chars: "E", held: keyE})
 	if len(g.keys) != 2 {
 		t.Errorf("E pressed and held after the panel closed: %d keys queued, want 2", len(g.keys))
+	}
+}
+
+// After Esc closes a panel, a key typed with an input method types.
+func TestTypingAfterPanelCloses(t *testing.T) {
+	g := testGame(t)
+	g.overlay = programsPanel
+	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyEscape}})
+	g.typeHost(keyTick{pressed: []ebiten.Key{ebiten.KeyR}})
+	g.typeHost(keyTick{chars: "R", held: []ebiten.Key{ebiten.KeyR}})
+	if g.overlay != noPanel || !slices.Equal(g.keys, []machine.Key{machine.KeyR}) {
+		t.Errorf("R typed after Esc closed the panel: panel %q, keys %v", g.overlay, g.keys)
 	}
 }
 
@@ -537,5 +604,23 @@ func TestScreenFitsWindow(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A message too long to fit loses as little of its middle as it must.
+func TestShorten(t *testing.T) {
+	fits := func(s string) bool { return utf8.RuneCountInString(s) <= 10 }
+	for in, want := range map[string]string{
+		"short":                   "short",
+		"0123456789":              "0123456789",
+		"0123456789A":             "0123…6789A",
+		strings.Repeat("x", 5000): "xxxx…xxxxx",
+	} {
+		if got := shorten(in, fits); got != want {
+			t.Errorf("shorten(%.20q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := shorten("abc", func(string) bool { return false }); got != "…c" {
+		t.Errorf("shorten with no room = %q, want %q", got, "…c")
 	}
 }

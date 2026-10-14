@@ -39,7 +39,10 @@ func (g *game) handleShortcuts() {
 
 // handleKeys passes typed keys to the console, or to the open panel.
 func (g *game) handleKeys() {
-	g.typeHostKeys(g.kb.poll())
+	// Ebitengine reads the system's input once a frame, before the frame's
+	// first tick.
+	g.typeHostKeys(g.kb.poll(g.drawn))
+	g.drawn = false
 }
 
 // typeHostKeys types keys from the host keyboard. A key held down repeats

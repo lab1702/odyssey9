@@ -75,12 +75,17 @@ type game struct {
 	overlay  panel   // drawn over the window
 	toast    string
 	toastFor time.Duration
+	toastFit struct {
+		toast, text string  // the toast, and that shortened to fit
+		scale       float32 // at this scale
+	}
 	clean    [machine.Steps]byte // the program as last saved or loaded
 	pending  string              // action waiting to be confirmed by repeating it
 	pendFor  time.Duration
 	keyLit   map[machine.Key]int // frames left to show a key as pressed
 	mouseKey machine.Key
 	kb       hostKeyboard
+	drawn    bool          // a frame was drawn since the last tick
 	quiet    bool          // a key closed a panel: ignore it repeating
 	keys     []machine.Key // typed keys on their way to the console, oldest first
 	held     int           // how many of them were left waiting for a program

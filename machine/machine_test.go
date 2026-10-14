@@ -689,6 +689,20 @@ func TestNoBurstAfterSig(t *testing.T) {
 	}
 }
 
+// Time going backwards doesn't lengthen a sound or SIG pause.
+func TestNegativeUpdate(t *testing.T) {
+	var prog [Steps]byte
+	prog[0] = 0x05 // SIG
+	m := New()
+	m.LoadProgram(&prog)
+	m.Press(KeyE)
+	m.Update(time.Second / 60) // runs SIG
+	m.Update(-time.Hour)
+	if left := m.SoundLeft(); left > time.Second {
+		t.Errorf("SIG sound has %v left after a negative update", left)
+	}
+}
+
 func TestBuiltInGames(t *testing.T) {
 	m := New()
 	m.Press(Key3) // Computer Telepathy from the title screen

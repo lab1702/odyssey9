@@ -8,6 +8,7 @@ import (
 )
 
 // stopSignals are the signals that ask the emulator to stop (see
-// notifyStop). On Windows, closing the console window, logging off and
-// shutting down arrive as SIGTERM.
+// notifyStop). On Windows, closing the console window arrives as SIGTERM.
+// Logging off and shutting down don't: Windows doesn't tell a console
+// program that has windows about them.
 var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}

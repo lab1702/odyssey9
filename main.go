@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -71,39 +72,66 @@ func main() {
 	ebiten.SetWindowSize(w, h)
 	ebiten.SetTPS(60)
 	if err := ebiten.RunGame(g); err != nil && err != errQuit {
+		// The error stops the emulator without asking, so keep the program,
+		// unless this is a screenshot run: its program came from -load and
+		// -script and can be made again. Keep it before saying anything, as
+		// writing to a pipe whose reader has gone, such as a "| tee" that
+		// Ctrl+C stopped too, stops the emulator.
+		stopping.Lock() // a second Ctrl+C now waits for this
+		var kept string
+		var keepErr error
+		if g.unsaved() && *shot == "" {
+			kept, keepErr = g.saveRecovery()
+		}
 		fmt.Fprintln(os.Stderr, err)
 		// A missing or broken sound device is only reported once the game
 		// is running, as an error from the audio library.
 		if msg := err.Error(); sound && (strings.HasPrefix(msg, "oto:") || strings.HasPrefix(msg, "audio:")) {
 			fmt.Fprintln(os.Stderr, "The sound output failed. Run with -mute to start without sound.")
 		}
-		// The error stops the emulator without asking, so keep the program,
-		// unless this is a screenshot run: its program came from -load and
-		// -script and can be made again.
-		if g.unsaved() && *shot == "" {
-			if name, err := g.saveRecovery(); err != nil {
-				fmt.Fprintln(os.Stderr, "Your unsaved program could not be kept:", err)
-			} else {
-				fmt.Fprintln(os.Stderr, "Your unsaved program was saved in", name)
-			}
+		if keepErr != nil {
+			fmt.Fprintln(os.Stderr, "Your unsaved program could not be kept:", keepErr)
+		} else if kept != "" {
+			fmt.Fprintln(os.Stderr, "Your unsaved program was saved in", kept)
 		}
 		os.Exit(1)
 	}
 }
 
+// stopping is held while the emulator stops after an error, keeping an
+// unsaved program.
+var stopping sync.Mutex
+
 // notifyStop returns a channel that receives the first signal asking the
 // emulator to stop, such as Ctrl+C in the terminal it was started from, or
 // the terminal closing. Update then stops it as an error does, so that an
-// unsaved program is kept. A second signal stops it at once, as the game
-// loop may be held up.
+// unsaved program is kept. A second Ctrl+C stops it at once, as the game
+// loop may be held up, but only once any unsaved program is kept. Other
+// signals that follow are ignored: closing a terminal can send two
+// hangups, and logging out can send a hangup and SIGTERM.
 func notifyStop() <-chan os.Signal {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, stopSignals...)
+	var sigs []os.Signal
+	for _, s := range stopSignals {
+		// A signal the emulator was started ignoring, as by nohup, stays
+		// ignored.
+		if !signal.Ignored(s) {
+			sigs = append(sigs, s)
+		}
+	}
 	stop := make(chan os.Signal, 1)
+	if len(sigs) == 0 {
+		return stop
+	}
+	c := make(chan os.Signal, 4)
+	signal.Notify(c, sigs...)
 	go func() {
-		s := <-c
-		signal.Reset(stopSignals...)
-		stop <- s
+		stop <- <-c
+		for s := range c {
+			if s == os.Interrupt {
+				stopping.Lock()
+				os.Exit(1)
+			}
+		}
 	}()
 	return stop
 }

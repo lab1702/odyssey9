@@ -481,6 +481,7 @@ func (m *Machine) pressExecute(k Key) {
 
 // Update advances the machine by dt of real time.
 func (m *Machine) Update(dt time.Duration) {
+	dt = max(dt, 0)
 	if m.soundLeft > 0 {
 		m.soundLeft -= dt
 	}

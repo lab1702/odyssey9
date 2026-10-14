@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -31,6 +32,7 @@ const (
 )
 
 func (g *game) Draw(screen *ebiten.Image) {
+	g.drawn = true
 	c := canvas{screen, g.scale}
 	screen.Fill(rgb(0x2A2622))
 	g.drawBackground(c)
@@ -147,13 +149,14 @@ func (g *game) drawToast(c canvas) {
 	if g.toastFor <= 0 || g.toast == "" {
 		return
 	}
-	const maxW = scrW - 20
-	text := g.toast
-	for r := []rune(text); c.textWidth(text, fontRegular, 13)+24 > maxW && len(r) > 1; {
-		mid := len(r) / 2
-		r = append(r[:mid], r[mid+1:]...)
-		text = string(r[:mid]) + "…" + string(r[mid:])
+	// Measuring a long message is slow, so its shortened text is kept.
+	if f := &g.toastFit; f.toast != g.toast || f.scale != c.s {
+		f.toast, f.scale = g.toast, c.s
+		f.text = shorten(g.toast, func(s string) bool {
+			return c.textWidth(s, fontRegular, 13)+24 <= scrW-20
+		})
 	}
+	text := g.toastFit.text
 	w := c.textWidth(text, fontRegular, 13) + 24
 	x, y := float32(scrX)+(scrW-w)/2, float32(scrY+scrH-38)
 	if g.overlay != noPanel {
@@ -161,6 +164,21 @@ func (g *game) drawToast(c canvas) {
 	}
 	c.rrect(x, y, w, 26, 8, rgba(0x000000, 0xD0))
 	c.text(text, fontRegular, 13, x+w/2, y+13, rgb(0xFFFFFF), 0)
+}
+
+// shorten returns s, or if it doesn't fit, s with as few characters as
+// possible from its middle replaced by "…".
+func shorten(s string, fits func(string) bool) string {
+	if fits(s) {
+		return s
+	}
+	r := []rune(s)
+	cut := func(n int) string { // s without n characters from its middle
+		keep := len(r) - n
+		return string(r[:keep/2]) + "…" + string(r[len(r)-(keep-keep/2):])
+	}
+	n := 1 + sort.Search(len(r)-1, func(i int) bool { return fits(cut(i + 1)) })
+	return cut(min(n, len(r)-1))
 }
 
 func (g *game) drawButtons(c canvas) {

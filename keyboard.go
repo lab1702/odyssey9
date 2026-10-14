@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"runtime"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -190,28 +191,50 @@ type hostKey struct {
 
 // hostKeyboard turns the host keyboard's input into Odyssey2 keys, one tick
 // at a time. With an input method, as on most Linux desktops, a key's
-// character can come a tick after the key is reported pressed, so it keeps
-// count of the characters still to come.
+// character can come the next time the system's input is read (a poll)
+// after the key is reported pressed, which can be several ticks later when
+// the game loop runs more than one tick a frame. So it keeps the keys whose
+// characters are still to come.
 type hostKeyboard struct {
-	owed    int       // characters still to come for keys pressed
-	owedFor int       // ticks left to wait for them
-	held    []hostKey // keys pressed after those, waiting for them
+	waiting   []ebiten.Key // keys pressed whose characters haven't come, oldest first
+	waitPolls int          // polls left to wait for them
+	waitTicks int          // ticks left to wait for them, in case polls aren't counted
+	held      []hostKey    // keys pressed after those, waiting for them
+	downPolls int          // polls left in which a key held down can repeat
+	lastKey   ebiten.Key   // the key whose character came last
+	lastChar  rune         // and that character
 }
 
-// charWait is how many ticks a pressed key's character is waited for. A
-// key held down only starts repeating after a much longer time.
-const charWait = 3
+// How long a pressed key's character is waited for: until the poll after
+// next, or about half a second. A key's last repeat can come as late after
+// it is let go.
+const (
+	charPolls = 3
+	charTicks = 30
+)
+
+// keyInput is one tick of the host keyboard's input.
+type keyInput struct {
+	chars     []rune       // characters typed
+	pressed   []ebiten.Key // keys just pressed
+	down      []ebiten.Key // keys held down, including those just pressed
+	backspace int          // ticks Backspace has been held
+	newPoll   bool         // the system's input was read since the last tick
+}
 
 // poll returns the Odyssey2 keys typed on the host keyboard this tick.
+// newPoll says whether the system's input was read since the last tick.
 // Keys typed with a shortcut modifier held are left to the system,
 // including Backspace, Enter, Delete and Esc, so that a habit such as
 // Cmd+Backspace on a Mac doesn't CLEAR.
-func (h *hostKeyboard) poll() []hostKey {
-	if shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
-		return h.next(nil, nil, 0)
+func (h *hostKeyboard) poll(newPoll bool) []hostKey {
+	in := keyInput{down: inpututil.AppendPressedKeys(nil), newPoll: newPoll}
+	if !shortcutHeld(runtime.GOOS, ebiten.IsKeyPressed) {
+		in.chars = ebiten.AppendInputChars(nil)
+		in.pressed = inpututil.AppendJustPressedKeys(nil)
+		in.backspace = inpututil.KeyPressDuration(ebiten.KeyBackspace)
 	}
-	return h.next(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
-		inpututil.KeyPressDuration(ebiten.KeyBackspace))
+	return h.next(in)
 }
 
 // shortcutHeld reports whether a modifier is held that makes keys a
@@ -229,45 +252,46 @@ func shortcutHeld(goos string, held func(ebiten.Key) bool) bool {
 	return (held(ebiten.KeyControl) || held(ebiten.KeyAlt)) && !held(ebiten.KeyAltRight)
 }
 
-// next turns one tick of host keyboard input into Odyssey2 keys: the
-// characters typed, the keys just pressed and how many ticks Backspace has
-// been held.
+// next turns one tick of host keyboard input into Odyssey2 keys.
 //
-// Characters for keys pressed in an earlier tick come first, as they were
-// typed first, and Enter, Backspace, Delete and Esc wait for any that
-// haven't come yet. Otherwise Ebitengine doesn't say in what order
-// characters and other keys came within a tick, so they are put in the
-// order that does least harm when two land in the same tick. Backspace and
-// Enter go first: if that is wrong, the line on the screen shows it or the
-// console beeps, where the other order could silently store a wrong step.
-// Delete and Esc go last, so a character typed with them is lost rather
-// than taken as a command.
-func (h *hostKeyboard) next(chars []rune, pressed []ebiten.Key, backspace int) []hostKey {
-	if h.owedFor > 0 {
-		h.owedFor--
+// A character is a press's when a key waiting for its character takes it.
+// A held key repeats only until another key is pressed, so its repeats come
+// before the characters of keys pressed in the same tick: those keys take
+// the tick's last characters. Any others are a held key repeating, or,
+// with no key held, a key Ebitengine doesn't know.
+//
+// Characters of keys pressed before this tick come first, as they were
+// typed first, and the keys pressed in this tick wait for any that haven't
+// come yet. Otherwise Ebitengine doesn't say in what order characters and
+// other keys came within a tick, so they are put in the order that does
+// least harm when two land in the same tick. Backspace and Enter go first:
+// if that is wrong, the line on the screen shows it or the console beeps,
+// where the other order could silently store a wrong step. Delete and Esc
+// go last, after the characters of keys pressed with them, so a character
+// typed with them is lost rather than taken as a command.
+func (h *hostKeyboard) next(in keyInput) []hostKey {
+	if in.newPoll {
+		h.waitPolls--
+		h.downPolls--
 	}
-	if h.owedFor == 0 {
-		h.owed = 0 // such as a dead key, which types nothing by itself
+	h.waitTicks--
+	if h.waitPolls <= 0 || h.waitTicks <= 0 {
+		h.waiting = nil // such as a dead key, which types nothing by itself
 	}
-	var keys []hostKey
-	late := min(h.owed, len(chars))
-	keys = appendChars(keys, chars[:late], false)
-	chars, h.owed = chars[late:], h.owed-late
-	if h.owed == 0 {
-		keys = append(keys, h.held...)
-		h.held = nil
+	if slices.ContainsFunc(in.down, typesChar) {
+		h.downPolls = charPolls
 	}
 
 	var first, last []hostKey
 	// Backspace repeats while held, like typed characters: after half a
 	// second, 15 times a second.
-	if backspace == 1 {
+	if in.backspace == 1 {
 		first = append(first, hostKey{keyBackspace, false})
-	} else if backspace >= 30 && (backspace-30)%4 == 0 {
+	} else if in.backspace >= 30 && (in.backspace-30)%4 == 0 {
 		first = append(first, hostKey{keyErase, true})
 	}
-	typing := 0 // keys pressed that type a character
-	for _, p := range pressed {
+	var typing []ebiten.Key
+	for _, p := range in.pressed {
 		switch {
 		case p == ebiten.KeyEnter || p == ebiten.KeyNumpadEnter:
 			first = append(first, hostKey{machine.KeyEnter, false})
@@ -276,34 +300,66 @@ func (h *hostKeyboard) next(chars []rune, pressed []ebiten.Key, backspace int) [
 		case p == ebiten.KeyEscape:
 			last = append(last, hostKey{machine.KeyReset, false})
 		case typesChar(p):
-			typing++
+			typing = append(typing, p)
 		}
 	}
-	if h.owed > 0 {
-		// All of this tick's characters were late ones.
-		h.held = append(append(h.held, first...), last...)
-	} else {
-		keys = append(keys, first...)
-		// As many characters as keys were pressed are theirs. Any more
-		// are from a key held down.
-		n := min(typing, len(chars))
-		keys = appendChars(keys, chars[:n], false)
-		keys = appendChars(keys, chars[n:], true)
-		keys = append(keys, last...)
-		typing -= n
+	old := len(h.waiting) // keys pressed before this tick still waiting
+	if len(typing) > 0 {
+		h.waiting = append(h.waiting, typing...)
+		h.waitPolls, h.waitTicks = charPolls, charTicks
 	}
-	if typing > 0 {
-		h.owed, h.owedFor = h.owed+typing, charWait
-	}
-	return keys
-}
 
-// appendChars appends the Odyssey2 keys for the characters chars to keys.
-func appendChars(keys []hostKey, chars []rune, repeat bool) []hostKey {
-	for _, r := range chars {
-		if k, ok := keyForRune(r); ok {
-			keys = append(keys, hostKey{k, repeat})
+	// Which characters the waiting keys take. With an input method, the
+	// last repeats of a key held down can come with the press of the next
+	// one, before its character: the last key's character, with a key held
+	// that isn't waiting, is such a repeat.
+	repeating := slices.ContainsFunc(in.down, func(k ebiten.Key) bool {
+		return typesChar(k) && !slices.Contains(h.waiting, k)
+	})
+	var takers []int
+	for i, r := range in.chars {
+		if !(repeating && r == h.lastChar && !slices.Contains(h.waiting, h.lastKey)) {
+			takers = append(takers, i)
 		}
+	}
+	takers = takers[max(0, len(takers)-len(h.waiting)):]
+	late := min(len(takers), old) // taken by keys pressed before this tick
+
+	var keys, now []hostKey
+	for i, r := range in.chars {
+		k, ok := keyForRune(r)
+		t := slices.Index(takers, i)
+		switch {
+		case t < 0:
+			// a key held down repeating
+		case t < late:
+			h.lastKey, h.lastChar = h.waiting[t], r
+		default:
+			h.lastKey, h.lastChar = h.waiting[t], r
+			if ok {
+				now = append(now, hostKey{k, false})
+			}
+			continue
+		}
+		if ok {
+			keys = append(keys, hostKey{k, t < 0 && h.downPolls > 0})
+		}
+	}
+	h.waiting = h.waiting[len(takers):]
+
+	if late < old {
+		// A key pressed before this tick still hasn't typed its character
+		// (and none of this tick's characters were its).
+		h.held = append(append(h.held, first...), last...)
+		return keys
+	}
+	keys = append(keys, h.held...)
+	h.held = nil
+	keys = append(append(keys, first...), now...)
+	if len(h.waiting) > 0 {
+		h.held = append(h.held, last...)
+	} else {
+		keys = append(keys, last...)
 	}
 	return keys
 }
