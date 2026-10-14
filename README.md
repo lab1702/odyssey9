@@ -160,3 +160,9 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 | `audio.go` | sound synthesis |
 | `draw.go` | resolution-independent drawing helpers |
 | `script.go` | scripted key input and screenshots, used for testing (`-script`, `-screenshot`) |
+
+## License
+
+The emulator source code is released under the [MIT License](LICENSE).
+The Computer Intro! manual (`Computer Intro (USA).pdf`, `computer-intro.txt`)
+is © 1979 Magnavox and is not covered by this license.
