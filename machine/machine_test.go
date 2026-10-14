@@ -338,6 +338,32 @@ func TestFlashCardProgram(t *testing.T) {
 	}
 }
 
+// The original Creepy Crawler piles little men up around the screen.
+func TestCreepyCrawler(t *testing.T) {
+	m := New()
+	m.LoadProgram(Samples[0].Program())
+	m.Press(KeyE)
+	buzzed := false
+	for range 500 {
+		m.blockLeft = 0
+		m.Step()
+		buzzed = buzzed || m.CurrentSound() == SoundBuzz
+	}
+	men := 0
+	for _, c := range m.Screen {
+		switch c {
+		case 0x3A:
+			men++
+		case blank:
+		default:
+			t.Fatalf("unexpected symbol %02X on screen", c)
+		}
+	}
+	if men < 3 || !buzzed {
+		t.Errorf("%d little men on screen, buzzed %v; want them piled up with a buzz", men, buzzed)
+	}
+}
+
 func TestCreepyCrawlerII(t *testing.T) {
 	m := New()
 	m.LoadProgram(Samples[1].Program())
@@ -467,30 +493,32 @@ func TestHaltContinueAfterDetour(t *testing.T) {
 // RESET while the program waits at INP/INA, then C, waits for the key
 // again instead of skipping the input.
 func TestResetDuringInputContinue(t *testing.T) {
-	var prog [Steps]byte
-	prog[0], prog[1], prog[99] = opGTO, 0x99, opINP // GTO.99; INP.0 at step 99
-	m := New()
-	m.LoadProgram(&prog)
-	m.Press(KeyE)
-	m.Update(time.Second)
-	if !m.WaitingForKey() {
-		t.Fatalf("not waiting: PC=%02d mode %v", m.PC, m.Mode())
-	}
-	m.Press(KeyReset)
-	m.Press(KeyD)
-	m.Press(KeyP)
-	if got := m.Status(); got != "PROG CNTR  99" {
-		t.Errorf("PC display %q", got)
-	}
-	m.Press(KeyClear)
-	m.Press(KeyC)
-	m.Update(time.Second)
-	if !m.WaitingForKey() {
-		t.Fatalf("C skipped the input: PC=%02d mode %v", m.PC, m.Mode())
-	}
-	m.Press(Key5)
-	if m.R[0] != 5 {
-		t.Errorf("R0=%02X after pressing 5", m.R[0])
+	for _, op := range []byte{opINP, opINA} {
+		var prog [Steps]byte
+		prog[0], prog[1], prog[99] = opGTO, 0x99, op // GTO.99; INP.0 or INA at step 99
+		m := New()
+		m.LoadProgram(&prog)
+		m.Press(KeyE)
+		m.Update(time.Second)
+		if !m.WaitingForKey() {
+			t.Fatalf("%02X: not waiting: PC=%02d mode %v", op, m.PC, m.Mode())
+		}
+		m.Press(KeyReset)
+		m.Press(KeyD)
+		m.Press(KeyP)
+		if got := m.Status(); got != "PROG CNTR  99" {
+			t.Errorf("%02X: PC display %q", op, got)
+		}
+		m.Press(KeyClear)
+		m.Press(KeyC)
+		m.Update(time.Second)
+		if !m.WaitingForKey() {
+			t.Fatalf("%02X: C skipped the input: PC=%02d mode %v", op, m.PC, m.Mode())
+		}
+		m.Press(Key5)
+		if got := map[byte]byte{opINP: m.R[0], opINA: m.A}[op]; got != 5 {
+			t.Errorf("%02X: read %02X after pressing 5", op, got)
+		}
 	}
 }
 
@@ -691,6 +719,22 @@ func TestBuiltInGames(t *testing.T) {
 	if got := screenText(m); got != "03 07 50 02" {
 		t.Errorf("between NO got %q", got)
 	}
+	// Y and N share YES and NO's codes, so they answer too; other keys
+	// don't.
+	b.lo, b.hi, b.secret, b.waiting = 3, 7, 5, true
+	m.Press(KeyA)
+	if !b.waiting || b.score != 2 {
+		t.Errorf("A answered: waiting %v, score %d", b.waiting, b.score)
+	}
+	m.Press(KeyY)
+	if got := screenText(m); got != "03 05 07 03" {
+		t.Errorf("between Y got %q", got)
+	}
+	b.lo, b.hi, b.secret, b.waiting = 3, 7, 50, true
+	m.Press(KeyN)
+	if got := screenText(m); got != "03 07 50 04" {
+		t.Errorf("between N got %q", got)
+	}
 }
 
 // Between the Sheets: YES is right about half the time, and the secret is
@@ -721,6 +765,72 @@ func TestFlashCardShowsProblem(t *testing.T) {
 	m.Update(100 * time.Millisecond)
 	if got := screenText(m); strings.TrimSpace(got) == "" {
 		t.Errorf("new problem not shown: %q", got)
+	}
+}
+
+// Flash Card: a wrong answer gets an angry NO, which the next digit
+// clears; a right one stays on the screen, no longer blinking, until any
+// key brings the next problem.
+func TestFlashCardGame(t *testing.T) {
+	m := New()
+	m.Press(Key2)
+	g := m.game.(*flashCard)
+	g.a, g.b = 3, 4
+	g.drawProblem(m, true)
+	m.Press(Key0)
+	m.Press(Key8)
+	if got := screenText(m); got != "3+4=08 NO  " || m.CurrentSound() != SoundError {
+		t.Errorf("wrong answer: screen %q, sound %v", got, m.CurrentSound())
+	}
+	m.Press(KeyA) // not a digit
+	if got := screenText(m); got != "3+4=08 NO  " || len(g.answer) != 0 {
+		t.Errorf("A taken as an answer: screen %q", got)
+	}
+	m.Press(Key0)
+	if got := screenText(m); got != "3+4=0      " {
+		t.Errorf("next digit didn't clear the NO: %q", got)
+	}
+	m.Press(Key7)
+	if got := screenText(m); got != "3+4=07     " || !g.solved || m.CurrentSound() != SoundChirp {
+		t.Errorf("right answer: screen %q, solved %v, sound %v", got, g.solved, m.CurrentSound())
+	}
+	for range 120 { // 2 s: the solved problem doesn't blink
+		m.Update(time.Second / 60)
+		if got := screenText(m); got != "3+4=07     " {
+			t.Fatalf("solved problem changed to %q", got)
+		}
+	}
+	m.Press(KeyA)
+	if g.solved || len(g.answer) != 0 || strings.TrimSpace(screenText(m)[4:]) != "" {
+		t.Errorf("any key didn't bring a new problem: %q", screenText(m))
+	}
+}
+
+// The built-in Creepy Crawler flashes blocks on and off at random with a
+// buzz, and ignores the keys.
+func TestCreepyCrawlerGame(t *testing.T) {
+	m := New()
+	m.Press(Key1)
+	buzzed, on, off := false, 0, 0
+	for range 600 { // 10 s
+		before := m.Screen
+		m.Press(Key5)
+		m.Update(time.Second / 60)
+		buzzed = buzzed || m.CurrentSound() == SoundBuzz
+		for i, c := range m.Screen {
+			switch {
+			case c != blank && c != 0x2F:
+				t.Fatalf("unexpected symbol %02X on screen", c)
+			case c == before[i]:
+			case c == 0x2F:
+				on++
+			default:
+				off++
+			}
+		}
+	}
+	if on == 0 || off == 0 || !buzzed || m.Mode() != ModeGame {
+		t.Errorf("blocks on %d times and off %d, buzzed %v, mode %v", on, off, buzzed, m.Mode())
 	}
 }
 

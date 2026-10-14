@@ -311,18 +311,47 @@ func TestMonitorWindowWidth(t *testing.T) {
 		name       string
 		ww, wh     int
 		oldW, newW float32
+		mw         int
 		want       int
 	}{
-		{"open, picture fills the width", baseW, baseH, baseW, open, open},
-		{"close, picture fills the width", open, baseH, open, baseW, baseW},
-		{"open at double size", 2 * baseW, 2 * baseH, baseW, open, 2 * open},
-		{"open in a wide window", 2000, baseH, baseW, open, 2000},
-		{"close in a wide window", 2000, baseH, open, baseW, 2000},
-		{"open in a slightly wide window", 1000, baseH, baseW, open, open},
+		{"open, picture fills the width", baseW, baseH, baseW, open, 0, open},
+		{"close, picture fills the width", open, baseH, open, baseW, 0, baseW},
+		{"open at double size", 2 * baseW, 2 * baseH, baseW, open, 0, 2 * open},
+		{"open in a wide window", 2000, baseH, baseW, open, 0, 2000},
+		{"close in a wide window", 2000, baseH, open, baseW, 0, 2000},
+		{"open in a slightly wide window", 1000, baseH, baseW, open, 0, open},
+		{"open on a wide monitor", baseW, baseH, baseW, open, 1920, open},
+		{"open on a narrow monitor", baseW, baseH, baseW, open, 1000, 1000},
+		{"open in a window wider than the monitor", 1200, baseH, baseW, open, 1000, 1200},
 	}
 	for _, c := range cases {
-		if got := monitorWindowWidth(c.ww, c.wh, c.oldW, c.newW); got != c.want {
+		if got := monitorWindowWidth(c.ww, c.wh, c.oldW, c.newW, c.mw); got != c.want {
 			t.Errorf("%s: width %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// The first window fits the monitor both ways, keeping the picture's shape.
+func TestFitWindow(t *testing.T) {
+	const open = baseW + monitorW
+	cases := []struct {
+		name   string
+		w      float32
+		mw, mh int
+		ww, wh int
+	}{
+		{"unknown monitor", open, 0, 0, open, baseH},
+		{"large monitor", open, 3840, 2160, open, baseH},
+		{"short monitor", baseW, 1920, baseH / 2, baseW * 9 / 20, baseH * 9 / 20},
+		{"portrait monitor", open, open / 2, 1920, open * 95 / 200, baseH * 95 / 200},
+	}
+	for _, c := range cases {
+		ww, wh := fitWindow(c.w, baseH, c.mw, c.mh)
+		if ww > c.ww+1 || ww < c.ww-1 || wh > c.wh+1 || wh < c.wh-1 {
+			t.Errorf("%s: window %d×%d, want %d×%d", c.name, ww, wh, c.ww, c.wh)
+		}
+		if c.mw > 0 && (ww > c.mw || wh > c.mh) {
+			t.Errorf("%s: window %d×%d larger than monitor %d×%d", c.name, ww, wh, c.mw, c.mh)
 		}
 	}
 }

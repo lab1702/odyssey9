@@ -1,8 +1,10 @@
 package machine
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 func TestParseProgramSpacing(t *testing.T) {
@@ -53,5 +55,25 @@ func TestParseProgramOverlaps(t *testing.T) {
 	p, err := ParseProgram(strings.NewReader("02 C0\n00 60 05\n"))
 	if err != nil || p[0] != 0x60 || p[2] != 0xC0 {
 		t.Errorf("steps out of order: %v", err)
+	}
+}
+
+// Listings saved as UTF-16, as Windows PowerShell's > and Notepad's
+// "Unicode" do, load like UTF-8 ones.
+func TestParseProgramUTF16(t *testing.T) {
+	src := "\uFEFF00 60 05  LDV.0.05\r\n02 FF\r\n"
+	for name, big := range map[string]bool{"little-endian": false, "big-endian": true} {
+		var b []byte
+		for _, u := range utf16.Encode([]rune(src)) {
+			if big {
+				b = append(b, byte(u>>8), byte(u))
+			} else {
+				b = append(b, byte(u), byte(u>>8))
+			}
+		}
+		p, err := ParseProgram(bytes.NewReader(b))
+		if err != nil || p[0] != 0x60 || p[1] != 0x05 || p[2] != 0xFF {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

@@ -117,15 +117,24 @@ func (g *game) logicalW() float32 {
 }
 
 func (g *game) windowSize() (int, int) {
-	w, h := g.logicalW(), float32(baseH)
+	var mw, mh int
 	if mon := ebiten.Monitor(); mon != nil {
-		_, mh := mon.Size()
-		if mh > 0 && float32(mh)*0.9 < h {
-			f := float32(mh) * 0.9 / h
-			w, h = w*f, h*f
-		}
+		mw, mh = mon.Size()
 	}
-	return int(w), int(h)
+	return fitWindow(g.logicalW(), baseH, mw, mh)
+}
+
+// fitWindow returns the size of a window for a w by h picture, scaled down
+// if need be to fit a mw by mh monitor (0 if unknown) with room to spare.
+func fitWindow(w, h float32, mw, mh int) (int, int) {
+	f := float32(1)
+	if mh > 0 {
+		f = min(f, float32(mh)*0.9/h)
+	}
+	if mw > 0 {
+		f = min(f, float32(mw)*0.95/w)
+	}
+	return int(w * f), int(h * f)
 }
 
 func (g *game) Layout(outsideW, outsideH int) (int, int) {
@@ -239,7 +248,7 @@ func (g *game) deliver(k machine.Key) {
 // runConsole passes the queued keys to the console and runs it for dt.
 func (g *game) runConsole(dt time.Duration) {
 	if !g.power {
-		g.snd.set(machine.SoundNone, 0)
+		g.snd.set(machine.SoundNone, 0, true)
 		return
 	}
 	// Keys left waiting for a program are dropped once it has stopped, or
@@ -249,8 +258,12 @@ func (g *game) runConsole(dt time.Duration) {
 	}
 	g.deliverKeys()
 	g.held = len(g.keys)
+	// A key's beep starts now, before Update counts this tick off it, and
+	// a sound RESET stopped stops now. A sound that ends during Update is
+	// left to the stream to end, at its own time.
+	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft(), true)
 	g.m.Update(dt)
-	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft())
+	g.snd.set(g.m.CurrentSound(), g.m.SoundLeft(), false)
 }
 
 // closeWindow reports whether the window may close: when it would lose an
@@ -314,7 +327,11 @@ func (g *game) toggleOverlay(p panel) {
 func (g *game) toggleMonitor() {
 	ww, wh := ebiten.WindowSize()
 	g.monitor = !g.monitor
-	w := monitorWindowWidth(ww, wh, g.width, g.logicalW())
+	mw := 0
+	if mon := ebiten.Monitor(); mon != nil {
+		mw, _ = mon.Size()
+	}
+	w := monitorWindowWidth(ww, wh, g.width, g.logicalW(), mw)
 	if w != ww {
 		ebiten.SetWindowSize(w, wh)
 	}
@@ -329,14 +346,17 @@ func (g *game) toggleMonitor() {
 
 // monitorWindowWidth returns the window width to use when the logical width
 // changes from oldW to newW in a window of ww by wh, keeping the picture's
-// scale. The window grows only as far as the wider picture needs, and
-// shrinks only if the picture filled its width, so a window with room to
-// spare keeps its size.
-func monitorWindowWidth(ww, wh int, oldW, newW float32) int {
+// scale. The window grows only as far as the wider picture needs, and no
+// wider than the monitor's width mw (0 if unknown), and shrinks only if the
+// picture filled its width, so a window with room to spare keeps its size.
+func monitorWindowWidth(ww, wh int, oldW, newW float32, mw int) int {
 	fits := float64(ww)/float64(oldW) <= float64(wh)/baseH // picture fills the width
 	s := math.Min(float64(ww)/float64(oldW), float64(wh)/baseH)
 	want := int(math.Round(float64(newW) * s))
 	if newW > oldW {
+		if mw > 0 {
+			want = min(want, mw)
+		}
 		return max(ww, want)
 	}
 	if fits {

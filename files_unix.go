@@ -8,10 +8,12 @@ import (
 	"syscall"
 )
 
-// replaceable reports whether a file can be replaced by a new one without
-// its owner changing: it has no other hard links, and this user owns it.
-// A new file's group is checked once it is made (see sameGroup).
-func replaceable(fi fs.FileInfo) bool {
+// replaceable reports whether the file name, whose details are fi, can be
+// replaced by a new one without its owner changing: it has no other hard
+// links, and this user owns it. A new file's group is checked once it is
+// made (see sameGroup). A new file doesn't get the old one's extended
+// attributes, such as macOS Finder tags, which aren't checked.
+func replaceable(name string, fi fs.FileInfo) bool {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return true

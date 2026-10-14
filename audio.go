@@ -17,12 +17,17 @@ const sampleRate = 48000
 // tone is an endless 16-bit stereo stream whose waveform follows the
 // machine's current sound.
 type tone struct {
-	sound atomic.Int32
-	// The time the sound ends, in Unix nanoseconds. It ends then even if the
-	// game loop is held up, as on Windows while the window is dragged, and
-	// so can't stop it.
-	until atomic.Int64
-	left  int           // samples until the sound ends, from the last refresh
+	// The sound last started by the game loop. The stream times it in
+	// samples from when it first plays it, so it lasts its full length
+	// however late the stream picks it up, and ends on time even if the
+	// game loop is held up, as on Windows while the window is dragged.
+	cue atomic.Pointer[cue]
+	// Kept by the game loop, to tell a new sound from one still playing.
+	lastSnd  machine.Sound
+	lastLeft time.Duration
+
+	seen  *cue          // the cue being played
+	left  int           // samples until it ends
 	cur   machine.Sound // the waveform being generated
 	t     float64       // seconds since start
 	start float64       // value of t when cur began
@@ -37,8 +42,14 @@ type tone struct {
 	player *audio.Player
 }
 
+// cue is a sound to play and how long to play it.
+type cue struct {
+	snd machine.Sound
+	d   time.Duration
+}
+
 func (s *tone) Read(p []byte) (int, error) {
-	s.refresh(time.Now())
+	s.pickUp()
 	n := len(p) / 4 * 4
 	for i := 0; i < n; i += 4 {
 		v := s.sample()
@@ -46,6 +57,14 @@ func (s *tone) Read(p []byte) (int, error) {
 		p[i], p[i+1], p[i+2], p[i+3] = byte(x), byte(x>>8), byte(x), byte(x>>8)
 	}
 	return n, nil
+}
+
+// pickUp starts the sound the game loop last started, if it is new.
+func (s *tone) pickUp() {
+	if c := s.cue.Load(); c != s.seen {
+		s.seen = c
+		s.left = int(c.d.Seconds() * sampleRate)
+	}
 }
 
 // square advances the square wave by one sample at frequency f and returns
@@ -65,11 +84,10 @@ func (s *tone) sample() float64 {
 	s.t += dt
 	// When the sound stops or changes, keep the old waveform going while its
 	// volume fades out, so the output never jumps (which would click).
-	next := machine.Sound(s.sound.Load())
+	next := machine.SoundNone
 	if s.left > 0 {
 		s.left--
-	} else {
-		next = machine.SoundNone
+		next = s.seen.snd
 	}
 	fading := false
 	if next != s.cur {
@@ -139,16 +157,18 @@ func newAudio(enabled bool) *tone {
 	return t
 }
 
-// set starts sound snd, to play for d unless set again.
-func (s *tone) set(snd machine.Sound, d time.Duration) {
-	if s != nil {
-		s.until.Store(time.Now().Add(d).UnixNano())
-		s.sound.Store(int32(snd))
+// set tells the stream the machine is playing sound snd, with d of it left.
+// It is called every tick: only a different sound, or the same one with
+// more left (played again), starts a new one. The stream times each sound
+// itself, so when the machine's sound ends, the stream's runs to its own
+// end, unless cut is set, as when RESET or POWER stops the sound early.
+func (s *tone) set(snd machine.Sound, d time.Duration, cut bool) {
+	if s == nil {
+		return
 	}
-}
-
-// refresh counts the samples left until the sound ends, from time now.
-func (s *tone) refresh(now time.Time) {
-	d := time.Duration(s.until.Load() - now.UnixNano())
-	s.left = int(max(d, 0).Seconds() * sampleRate)
+	isNew := snd != s.lastSnd || d > s.lastLeft
+	s.lastSnd, s.lastLeft = snd, d
+	if isNew && (snd != machine.SoundNone || cut) {
+		s.cue.Store(&cue{snd, d})
+	}
 }

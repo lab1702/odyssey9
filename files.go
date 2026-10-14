@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"odyssey9/machine"
@@ -49,7 +50,7 @@ func (g *game) save() {
 	}
 	// Saving over a file that holds a different program, or one that can't
 	// be read, needs confirming.
-	old, err := readListing(os.Open(g.file))
+	old, err := readListing(openListing(g.file))
 	switch {
 	case err == nil:
 		p, err := machine.ParseProgram(bytes.NewReader(old))
@@ -102,7 +103,7 @@ func writeFileAtomic(name string, data []byte) error {
 	if err := checkWritable(name); err != nil {
 		return err
 	}
-	if !replaceable(fi) {
+	if !replaceable(name, fi) {
 		return writeInPlace(name, data)
 	}
 	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
@@ -127,22 +128,49 @@ func writeFileAtomic(name string, data []byte) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = os.Chmod(f.Name(), fi.Mode().Perm())
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), name)
-		if errors.Is(err, fs.ErrPermission) {
-			os.Remove(f.Name())
-			return writeInPlace(name, data)
-		}
-	}
 	if err != nil {
 		os.Remove(f.Name())
 		return err
 	}
+	// The new file is written, so if it can't be given the old one's
+	// permissions or put in its place, the old one is rewritten instead.
+	// That happens when the file is a mount point (EBUSY), the file system
+	// doesn't do permissions, or on Windows another program has the file
+	// open.
+	if os.Chmod(f.Name(), fi.Mode().Perm()) != nil || rename(f.Name(), name) != nil {
+		os.Remove(f.Name())
+		return writeInPlace(name, data)
+	}
 	syncDir(filepath.Dir(name))
+	removeStale(filepath.Dir(name), filepath.Base(name))
 	return nil
+}
+
+// rename is os.Rename, replaced in tests to make it fail.
+var rename = os.Rename
+
+// staleAge is how old a temporary file left by an earlier save must be
+// before a save removes it. A younger one could belong to a save still
+// being made by another copy of the emulator.
+const staleAge = time.Hour
+
+// removeStale removes old temporary files left in dir by saves of the
+// file base that were stopped, such as by a power cut, before they renamed
+// them. CreateTemp names them base.<digits>.tmp.
+func removeStale(dir, base string) {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		mid, pre := strings.CutPrefix(e.Name(), base+".")
+		mid, suf := strings.CutSuffix(mid, ".tmp")
+		if !pre || !suf || mid == "" || strings.Trim(mid, "0123456789") != "" {
+			continue
+		}
+		n := filepath.Join(dir, e.Name())
+		if fi, err := os.Lstat(n); err == nil && fi.Mode().IsRegular() &&
+			time.Since(fi.ModTime()) > staleAge {
+			os.Remove(n)
+		}
+	}
 }
 
 // writeNewFile creates name, which doesn't exist yet. If name is a symlink
@@ -179,9 +207,18 @@ func writeNewFile(name string, data []byte) error {
 	return nil
 }
 
+// errSpecialFile is the error for a file that isn't a plain file, such as
+// a pipe or a device. Opening one can wait forever, freezing the window.
+var errSpecialFile = errors.New("this is not a plain file")
+
 // checkWritable returns the error from opening an existing file for
 // writing, if any.
 func checkWritable(name string) error {
+	if fi, err := os.Stat(name); err == nil {
+		if err := checkPlain(fi); err != nil {
+			return err
+		}
+	}
 	f, err := os.OpenFile(name, os.O_WRONLY, 0)
 	if err != nil {
 		return err
@@ -223,16 +260,39 @@ func writeInPlace(name string, data []byte) error {
 // remarks is a few KB.
 const maxListing = 1 << 20
 
-// readListing reads a listing file opened by the caller, refusing a folder
-// or a file too large to be a program.
+var errFolder = errors.New("this is a folder, not a program listing")
+
+// checkPlain refuses a folder or a special file, whose opening could
+// freeze the window, as a program listing.
+func checkPlain(fi fs.FileInfo) error {
+	switch {
+	case fi.IsDir():
+		return errFolder
+	case !fi.Mode().IsRegular():
+		return errSpecialFile
+	}
+	return nil
+}
+
+// openListing opens the listing file name, refusing one checkPlain does.
+func openListing(name string) (fs.File, error) {
+	fi, err := os.Stat(name)
+	if err == nil {
+		err = checkPlain(fi)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(name)
+}
+
+// readListing reads a listing file opened with openListing or checked with
+// checkPlain, refusing a file too large to be a program.
 func readListing(f fs.File, err error) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	if fi, err := f.Stat(); err == nil && fi.IsDir() {
-		return nil, errors.New("this is a folder, not a program listing")
-	}
 	data, err := io.ReadAll(io.LimitReader(f, maxListing+1))
 	if err == nil && len(data) > maxListing {
 		err = errors.New("this file is too large to be a program listing")
@@ -276,7 +336,7 @@ func writeRecovery(dir string, data []byte) (string, error) {
 }
 
 func (g *game) load() {
-	data, err := readListing(os.Open(g.file))
+	data, err := readListing(openListing(g.file))
 	if err != nil {
 		g.showToast("Load failed: " + err.Error())
 		return

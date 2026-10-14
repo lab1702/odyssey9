@@ -45,7 +45,7 @@ func main() {
 
 	m := machine.New()
 	if *load != "" {
-		data, err := readListing(os.Open(*load))
+		data, err := readListing(openListing(*load))
 		if err != nil {
 			log.Fatalf("%s: %v", *load, err)
 		}

@@ -108,7 +108,7 @@ Follow the manual. At power-on the screen says **SELECT GAME**:
 | letters, digits, `.` `?` `+` `-` `=`, space | the same key |
 | `*` | × |
 | `/` | ÷ |
-| `[` / `]` | YES / NO |
+| `[` / `]` | YES / NO (Y and N have the same key codes, so they answer Between the Sheets too) |
 | Enter | ENTER |
 | Delete | CLEAR |
 | Esc | RESET |
@@ -156,6 +156,8 @@ manual's tables load as they are:
 ```
 
 Each step may be given only once, and a line may not run past step 99.
+A listing is plain text in UTF-8, or in UTF-16 with a byte order mark, as
+some Windows tools save it.
 
 The manual's column headings and its remarks on lines of their own are not
 step lines: delete them, or start them with `;`. A remark straight after the

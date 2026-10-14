@@ -10,9 +10,17 @@ import (
 // playing returns a stream playing snd for a long time.
 func playing(start float64, snd machine.Sound) *tone {
 	s := &tone{t: start}
-	s.set(snd, time.Hour)
-	s.refresh(time.Now())
+	s.set(snd, time.Hour, true)
+	s.pickUp()
 	return s
+}
+
+// run generates d of the stream, picking up new sounds as Read does.
+func (s *tone) run(d time.Duration) {
+	s.pickUp()
+	for range int(d.Seconds() * sampleRate) {
+		s.sample()
+	}
 }
 
 // The chirp's pitch must keep warbling around 1320 Hz however long the
@@ -57,18 +65,66 @@ func TestBeepsStartOn(t *testing.T) {
 // held up.
 func TestSoundEndsWithoutGameLoop(t *testing.T) {
 	s := &tone{}
-	s.set(machine.SoundBuzz, 50*time.Millisecond)
-	s.refresh(time.Now())
-	for range sampleRate / 20 { // 50 ms
-		s.sample()
-	}
+	s.set(machine.SoundBuzz, 50*time.Millisecond, false)
+	s.run(50 * time.Millisecond)
 	if s.vol < 0.1 {
 		t.Fatalf("buzz silent before its end (volume %g)", s.vol)
 	}
-	for range sampleRate / 20 {
-		s.sample()
-	}
+	s.run(50 * time.Millisecond)
 	if s.vol > 0.001 {
 		t.Errorf("buzz still sounding 50 ms after its end (volume %g)", s.vol)
+	}
+}
+
+// A sound plays for its whole length however late after it starts the
+// stream picks it up, and the machine's own end of the sound, which comes
+// that much sooner, doesn't cut it short.
+func TestSoundLastsWhenPickedUpLate(t *testing.T) {
+	s := &tone{}
+	s.set(machine.SoundBeep, 60*time.Millisecond, true)
+	s.pickUp()
+	// The game loop counts the beep down and ends it, and goes on reporting
+	// no sound, before the stream has played it all.
+	for left := 60 * time.Millisecond; left > 0; left -= 16 * time.Millisecond {
+		s.set(machine.SoundBeep, left, false)
+	}
+	s.set(machine.SoundNone, 0, false)
+	s.set(machine.SoundNone, 0, true)
+	s.run(55 * time.Millisecond)
+	if s.vol < 0.1 {
+		t.Fatalf("beep silent 55 ms into a 60 ms beep (volume %g)", s.vol)
+	}
+	s.run(50 * time.Millisecond)
+	if s.vol > 0.001 {
+		t.Errorf("beep still sounding 45 ms after its end (volume %g)", s.vol)
+	}
+}
+
+// RESET or POWER stops a sound at once.
+func TestSoundCut(t *testing.T) {
+	s := playing(0, machine.SoundBuzz)
+	s.run(20 * time.Millisecond)
+	s.set(machine.SoundNone, 0, true)
+	s.run(40 * time.Millisecond) // fading out takes about 30 ms
+	if s.vol > 0.001 {
+		t.Errorf("buzz still sounding 40 ms after being cut (volume %g)", s.vol)
+	}
+}
+
+// Playing the same sound again restarts it, but the game loop reporting a
+// sound counting down doesn't.
+func TestSoundPlayedAgain(t *testing.T) {
+	s := &tone{}
+	s.set(machine.SoundBeep, 60*time.Millisecond, true)
+	s.run(40 * time.Millisecond)
+	s.set(machine.SoundBeep, 20*time.Millisecond, false)
+	s.run(10 * time.Millisecond)
+	if s.left != sampleRate/100 {
+		t.Fatalf("beep restarted by its countdown: %d samples left, want %d", s.left, sampleRate/100)
+	}
+	s.set(machine.SoundBeep, 60*time.Millisecond, false)
+	s.pickUp()
+	if s.left != 60*sampleRate/1000 {
+		t.Errorf("beep played again has %d samples left, want %d", s.left, 60*sampleRate/1000)
 	}
 }

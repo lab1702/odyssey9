@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"odyssey9/machine"
 )
@@ -84,5 +85,30 @@ func TestSaveKeepsGroup(t *testing.T) {
 	}
 	if gid := int(fi.Sys().(*syscall.Stat_t).Gid); gid != os.Getegid() {
 		t.Errorf("SAVE changed the file's group from %d to %d", os.Getegid(), gid)
+	}
+}
+
+// SAVE and LOAD refuse a pipe rather than wait, freezing the window, for
+// another program to open its other end.
+func TestPipeRefused(t *testing.T) {
+	g := testGame(t)
+	if err := syscall.Mkfifo(g.file, 0o644); err != nil {
+		t.Skip("no pipes:", err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	for name, f := range map[string]func(){"SAVE": g.save, "LOAD": g.load} {
+		done := make(chan struct{})
+		go func() { f(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s of a pipe hung", name)
+		}
+		if !strings.Contains(g.toast, "not a plain file") {
+			t.Errorf("%s of a pipe: toast %q", name, g.toast)
+		}
+	}
+	if g.m.Mem[0] != 0x08 {
+		t.Errorf("program changed to %02X", g.m.Mem[0])
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 )
 
 // ParseProgram reads a program listing. Each line starts with a decimal
@@ -15,8 +16,10 @@ import (
 // of two or more spaces or a tab; anything after that (an assembler
 // mnemonic, a remark) is ignored, as is any text after ';' or '#'. Lines
 // may end in LF, CR LF or CR, and any other Unicode space counts as a
-// space. Each step may be given only once, and a line may not run past
-// step 99. This accepts the listing format used in the manual:
+// space. The text is UTF-8, or UTF-16 if it starts with a byte order mark,
+// as Windows tools may save it. Each step may be given only once, and a
+// line may not run past step 99. This accepts the listing format used in
+// the manual:
 //
 //	04   6B 00  LDV.B.00   Set output position to 00
 func ParseProgram(r io.Reader) (*[Steps]byte, error) {
@@ -25,7 +28,7 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	text := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(string(data))
+	text := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(decodeText(data))
 	var setOn [Steps]int // the line that gave each step, or 0
 	lineNo, count := 0, 0
 	for line := range strings.SplitSeq(text, "\n") {
@@ -110,4 +113,23 @@ func FormatProgram(w io.Writer, title string, mem *[Steps]byte) error {
 		step += n
 	}
 	return bw.Flush()
+}
+
+// decodeText returns data as a string, decoding it from UTF-16 if it starts
+// with a UTF-16 byte order mark, which it drops.
+func decodeText(data []byte) string {
+	var get func(b []byte) uint16
+	switch {
+	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE:
+		get = func(b []byte) uint16 { return uint16(b[0]) | uint16(b[1])<<8 }
+	case len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF:
+		get = func(b []byte) uint16 { return uint16(b[0])<<8 | uint16(b[1]) }
+	default:
+		return string(data)
+	}
+	u := make([]uint16, 0, len(data)/2)
+	for i := 2; i+1 < len(data); i += 2 {
+		u = append(u, get(data[i:]))
+	}
+	return string(utf16.Decode(u))
 }

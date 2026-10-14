@@ -135,8 +135,17 @@ func (g *game) handleDrops() {
 		g.showToast("Drop one program listing at a time")
 		return
 	}
+	// The entry has the dropped file's details, which are checked before
+	// opening it.
 	name := entries[0].Name()
-	data, err := readListing(files.Open(name))
+	var data []byte
+	fi, err := entries[0].Info()
+	if err == nil {
+		err = checkPlain(fi)
+	}
+	if err == nil {
+		data, err = readListing(files.Open(name))
+	}
 	if err != nil {
 		g.showToast("Cannot read " + name + ": " + err.Error())
 		return

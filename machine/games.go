@@ -233,14 +233,16 @@ func (g *betweenSheets) key(m *Machine, k Key) {
 	if !g.waiting {
 		return
 	}
-	if k != KeyYes && k != KeyNo {
+	// Y and N have the same codes as YES and NO, so they answer too.
+	yes := k.Code() == KeyYes.Code()
+	if !yes && k.Code() != KeyNo.Code() {
 		m.errorBeep()
 		return
 	}
 	between := g.secret > g.lo && g.secret < g.hi
 	g.waiting = false
 	g.pause = 2 * time.Second
-	if between == (k == KeyYes) {
+	if between == yes {
 		g.score = (g.score + 1) % 100
 		n := []int{g.lo, g.secret, g.hi}
 		sort.Ints(n)
