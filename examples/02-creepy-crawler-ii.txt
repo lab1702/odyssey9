@@ -1,0 +1,24 @@
+; Creepy Crawler II (from the Computer Intro! manual)
+; Press E. An all-star cast of thousands.
+; Step  Hex    Assembler
+00 62 13  LDV.2.13
+02 08     RND
+03 BB     UNP.B     random position (B), random digit (C)
+04 9C     LDA.C
+05 E2     ADD.2
+06 AC     STO.C     C = 13 + digit: a step in the symbol table
+07 09     MOV       load symbol from that step
+08 0B     OTA
+09 05     SIG
+10 00     NOP
+11 12 02  GTO.02
+13 32
+14 33
+15 3A
+16 34
+17 35
+18 37
+19 3D
+20 3E
+21 36
+22 3C

@@ -1,0 +1,7 @@
+; Enter a Letter (from the Computer Intro! manual)
+; Press E, then any key; it appears on the screen.
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 70     INP.0
+03 C0     OUT.0
+04 71     INP.1     pause

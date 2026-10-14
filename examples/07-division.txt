@@ -1,0 +1,42 @@
+; Division (from the Computer Intro! manual)
+; Press E, then dividend and divisor (dividend larger).
+; Step  Hex    Assembler
+00 63 00  LDV.3.00
+02 6B 00  LDV.B.00
+04 70     INP.0
+05 C0     OUT.0
+06 69 2A  LDV.9.2A
+08 C9     OUT.9
+09 71     INP.1
+10 C1     OUT.1
+11 6A 2B  LDV.A.2B
+13 CA     OUT.A
+14 91     LDA.1
+15 D0     SUB.0
+16 A0     STO.0
+17 93     LDA.3
+18 03     INC
+19 A3     STO.3
+20 90     LDA.0
+21 13 40  BRZ.40
+23 91     LDA.1
+24 50 28  BLS.0.28
+26 12 15  GTO.15
+28 93     LDA.3
+29 B4     UNP.4
+30 C4     OUT.4
+31 C5     OUT.5
+32 66 10  LDV.6.10
+34 67 13  LDV.7.13
+36 C6     OUT.6
+37 C7     OUT.7
+38 12 00  GTO.00
+40 93     LDA.3
+41 B4     UNP.4
+42 C4     OUT.4
+43 C5     OUT.5
+44 66 0C  LDV.6.0C
+46 67 0C  LDV.7.0C
+48 C6     OUT.6
+49 C7     OUT.7
+50 12 00  GTO.00

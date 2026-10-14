@@ -1,0 +1,11 @@
+; Addition A (from the Computer Intro! manual)
+; Press E, then two digits. The sum appears.
+; Step  Hex    Assembler
+00 70     INP.0
+01 04     INA
+02 E0     ADD.0
+03 B1     UNP.1
+04 6B 00  LDV.B.00
+06 C1     OUT.1
+07 C2     OUT.2
+08 12 00  GTO.00

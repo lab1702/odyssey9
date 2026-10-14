@@ -1,0 +1,101 @@
+package main
+
+import (
+	"math"
+	"sync/atomic"
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2/audio"
+
+	"odyssey9/machine"
+)
+
+const sampleRate = 48000
+
+// tone is an endless 16-bit stereo stream whose waveform follows the
+// machine's current sound.
+type tone struct {
+	sound atomic.Int32
+	t     float64 // seconds since start
+	vol   float64 // smoothed volume to avoid clicks
+	lfsr  uint32
+	noise float64
+	nextN float64
+}
+
+func (s *tone) Read(p []byte) (int, error) {
+	n := len(p) / 4 * 4
+	for i := 0; i < n; i += 4 {
+		v := s.sample()
+		x := int16(v * 32767)
+		p[i], p[i+1], p[i+2], p[i+3] = byte(x), byte(x>>8), byte(x), byte(x>>8)
+	}
+	return n, nil
+}
+
+func square(t, f float64) float64 {
+	if math.Mod(t*f, 1) < 0.5 {
+		return 1
+	}
+	return -1
+}
+
+func (s *tone) sample() float64 {
+	const dt = 1.0 / sampleRate
+	s.t += dt
+	var v, target float64
+	switch machine.Sound(s.sound.Load()) {
+	case machine.SoundBeep:
+		v, target = square(s.t, 988), 0.22
+	case machine.SoundBuzz:
+		// The Odyssey2 buzz: a low square wave roughened by a noise shift
+		// register.
+		if s.t >= s.nextN {
+			s.nextN = s.t + 1.0/1800
+			if s.lfsr == 0 {
+				s.lfsr = 0xACE1
+			}
+			bit := (s.lfsr ^ s.lfsr>>2 ^ s.lfsr>>3 ^ s.lfsr>>5) & 1
+			s.lfsr = s.lfsr>>1 | bit<<15
+			s.noise = float64(bit)*2 - 1
+		}
+		v, target = 0.6*square(s.t, 98)+0.4*s.noise, 0.25
+	case machine.SoundError:
+		v, target = square(s.t, 165), 0.22
+	case machine.SoundChirp:
+		v, target = square(s.t, 1320+220*math.Sin(s.t*40)), 0.18
+	case machine.SoundBeeps:
+		if math.Mod(s.t*6, 1) < 0.55 {
+			target = 0.22
+		}
+		v = square(s.t, 1175)
+	}
+	s.vol += (target - s.vol) * 0.004
+	return v * s.vol
+}
+
+// newAudio starts the sound output. It returns nil if audio is disabled.
+func newAudio(enabled bool) *tone {
+	if !enabled {
+		return nil
+	}
+	ctx := audio.NewContext(sampleRate)
+	t := &tone{}
+	p, err := ctx.NewPlayer(t)
+	if err != nil {
+		return nil
+	}
+	p.SetBufferSize(40 * time.Millisecond)
+	p.Play()
+	keepAlive = p
+	return t
+}
+
+// keepAlive stops the player from being garbage collected.
+var keepAlive *audio.Player
+
+func (s *tone) set(snd machine.Sound) {
+	if s != nil {
+		s.sound.Store(int32(snd))
+	}
+}

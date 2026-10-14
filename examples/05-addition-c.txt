@@ -1,0 +1,26 @@
+; Addition C (from the Computer Intro! manual)
+; Press E, then two digits; the problem builds as you type.
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 70     INP.0
+03 C0     OUT.0
+04 63 10  LDV.3.10
+06 C3     OUT.3
+07 04     INA
+08 0B     OTA
+09 63 2B  LDV.3.2B
+11 C3     OUT.3
+12 E0     ADD.0
+13 B1     UNP.1
+14 C1     OUT.1
+15 C2     OUT.2
+16 70     INP.0     pause until the next problem
+17 6C 0B  LDV.C.0B
+19 67 0C  LDV.7.0C
+21 9C     LDA.C
+22 64 00  LDV.4.00
+24 02     DEC
+25 C7     OUT.7     erase with blanks
+26 24 24  BNE.4.24
+28 6B 00  LDV.B.00
+30 12 03  GTO.03

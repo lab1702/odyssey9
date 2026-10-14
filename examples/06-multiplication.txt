@@ -1,0 +1,27 @@
+; Multiplication (from the Computer Intro! manual)
+; Press E, then multiplicand and multiplier (2-9).
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 70     INP.0
+03 C0     OUT.0
+04 66 29  LDV.6.29
+06 C6     OUT.6
+07 71     INP.1
+08 C1     OUT.1
+09 67 2B  LDV.7.2B
+11 C7     OUT.7
+12 90     LDA.0
+13 E0     ADD.0
+14 A2     STO.2
+15 91     LDA.1
+16 02     DEC
+17 A1     STO.1
+18 63 01  LDV.3.01
+20 33 25  BEQ.3.25
+22 92     LDA.2
+23 12 13  GTO.13
+25 92     LDA.2
+26 B4     UNP.4
+27 C4     OUT.4
+28 C5     OUT.5
+29 12 00  GTO.00

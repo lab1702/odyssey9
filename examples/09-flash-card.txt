@@ -1,0 +1,62 @@
+; Flash Card (from the Computer Intro! manual)
+; Press E, then the two-digit answer (07 for 7).
+; Step  Hex    Assembler
+00 6A 0C  LDV.A.0C
+02 68 10  LDV.8.10
+04 69 2B  LDV.9.2B
+06 6C 2D  LDV.C.2D
+08 6D 17  LDV.D.17
+10 08     RND
+11 B0     UNP.0
+12 6B 00  LDV.B.00
+14 C0     OUT.0
+15 C8     OUT.8
+16 C1     OUT.1
+17 00     NOP
+18 C9     OUT.9
+19 90     LDA.0
+20 E1     ADD.1
+21 A2     STO.2
+22 73     INP.3
+23 C3     OUT.3
+24 74     INP.4
+25 C4     OUT.4
+26 83     PAK.3
+27 CA     OUT.A
+28 32 45  BEQ.2.45
+30 CC     OUT.C
+31 CD     OUT.D
+32 6B 04  LDV.B.04
+34 73     INP.3
+35 C3     OUT.3
+36 CA     OUT.A
+37 CA     OUT.A
+38 00     NOP
+39 CA     OUT.A
+40 CA     OUT.A
+41 6B 05  LDV.B.05
+43 12 24  GTO.24
+45 05     SIG       the musical reward
+46 14 70  GTS.70
+48 05     SIG
+49 05     SIG
+50 05     SIG
+51 14 70  GTS.70
+53 05     SIG
+54 14 70  GTS.70
+56 14 70  GTS.70
+58 05     SIG
+59 14 70  GTS.70
+61 05     SIG
+62 6B 00  LDV.B.00
+64 CA     OUT.A
+65 9B     LDA.B
+66 13 10  BRZ.10
+68 12 64  GTO.64
+70 67 00  LDV.7.00  rest (delay subroutine)
+72 6E 75  LDV.E.75
+74 9E     LDA.E
+75 00     NOP
+76 02     DEC
+77 27 75  BNE.7.75
+79 07     RET

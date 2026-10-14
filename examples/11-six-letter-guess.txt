@@ -1,0 +1,65 @@
+; Six Letter Guess (from the Computer Intro! manual)
+; Press E, type a 6-letter word, then your opponent guesses letters.
+; Step  Hex    Assembler
+00 67 01  LDV.7.01
+02 6B 00  LDV.B.00
+04 79     INP.9
+05 61 27  LDV.1.27
+07 C1     OUT.1
+08 7A     INP.A
+09 62 27  LDV.2.27
+11 C2     OUT.2
+12 7C     INP.C
+13 63 27  LDV.3.27
+15 C3     OUT.3
+16 7D     INP.D
+17 64 27  LDV.4.27
+19 C4     OUT.4
+20 7E     INP.E
+21 65 27  LDV.5.27
+23 C5     OUT.5
+24 7F     INP.F
+25 66 27  LDV.6.27
+27 C6     OUT.6
+28 6B 00  LDV.B.00
+30 C1     OUT.1
+31 C2     OUT.2
+32 C3     OUT.3
+33 00     NOP
+34 C4     OUT.4
+35 C5     OUT.5
+36 C6     OUT.6
+37 00     NOP
+38 37 00  BEQ.7.00
+40 04     INA
+41 39 55  BEQ.9.55
+43 3A 58  BEQ.A.58
+45 3C 61  BEQ.C.61
+47 3D 64  BEQ.D.64
+49 3E 67  BEQ.E.67
+51 3F 70  BEQ.F.70
+53 12 71  GTO.71
+55 A1     STO.1
+56 12 43  GTO.43
+58 A2     STO.2
+59 12 45  GTO.45
+61 A3     STO.3
+62 12 47  GTO.47
+64 A4     STO.4
+65 12 49  GTO.49
+67 A5     STO.5
+68 12 51  GTO.51
+70 A6     STO.6
+71 68 27  LDV.8.27
+73 98     LDA.8
+74 31 28  BEQ.1.28
+76 32 28  BEQ.2.28
+78 33 28  BEQ.3.28
+80 34 28  BEQ.4.28
+82 35 28  BEQ.5.28
+84 36 28  BEQ.6.28
+86 67 2B  LDV.7.2B
+88 97     LDA.7
+89 05     SIG
+90 05     SIG
+91 12 28  GTO.28

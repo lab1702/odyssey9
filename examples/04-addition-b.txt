@@ -1,0 +1,17 @@
+; Addition B (from the Computer Intro! manual)
+; Press E, then two digits. The whole problem appears.
+; Step  Hex    Assembler
+00 70     INP.0
+01 04     INA
+02 6B 00  LDV.B.00
+04 C0     OUT.0
+05 63 10  LDV.3.10
+07 C3     OUT.3
+08 0B     OTA
+09 63 2B  LDV.3.2B
+11 C3     OUT.3
+12 E0     ADD.0
+13 B1     UNP.1
+14 C1     OUT.1
+15 C2     OUT.2
+16 12 00  GTO.00

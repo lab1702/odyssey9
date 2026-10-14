@@ -1,0 +1,31 @@
+; Message (from the Computer Intro! manual)
+; Press E, then 1-6 to show a message.
+; Step  Hex    Assembler
+00 60 90  LDV.0.90  location table base
+02 61 0C  LDV.1.0C
+04 04     INA
+05 E0     ADD.0
+06 AC     STO.C
+07 09     MOV
+08 AC     STO.C
+09 6B 00  LDV.B.00
+11 62 11  LDV.2.11
+13 63 00  LDV.3.00
+15 91     LDA.1
+16 0B     OTA
+17 92     LDA.2
+18 02     DEC
+19 A2     STO.2
+20 23 15  BNE.3.15
+22 6B 00  LDV.B.00
+24 09     MOV
+25 33 04  BEQ.3.04
+27 0B     OTA
+28 12 24  GTO.24
+30 1D 12 0E 0E 17 00                    HELLO
+36 14 20 1F 12 0C 20 0C 0E 17 17 1F 00  TAKE A LOOK
+48 13 12 26 20 13 1F 20 25 0E 12 00     REMARKABLE
+59 2D 12 11 0C 1B 17 13 0C 07 08 00     NEW FOR 78
+70 18 15 12 19 14 16 17 2D 19 0D 00     QUESTIONS?
+81 23 17 26 12 0C 25 20 23 1F 00        COME BACK
+91 30 36 48 59 70 81                    location table

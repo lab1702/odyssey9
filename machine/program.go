@@ -1,0 +1,86 @@
+package machine
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+)
+
+// ParseProgram reads a program listing. Each line starts with a decimal
+// step number followed by one or more two-digit hex bytes; anything after
+// the bytes (an assembler mnemonic, a remark) is ignored, as is any text
+// after ';' or '#'. This accepts the listing format used in the manual:
+//
+//	04   6B 00  LDV.B.00   Set output position to 00
+func ParseProgram(r io.Reader) (*[Steps]byte, error) {
+	var mem [Steps]byte
+	sc := bufio.NewScanner(r)
+	lineNo, count := 0, 0
+	for sc.Scan() {
+		lineNo++
+		line := sc.Text()
+		if i := strings.IndexAny(line, ";#"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		step, err := strconv.Atoi(fields[0])
+		if err != nil || step < 0 || step >= Steps || len(fields[0]) > 2 {
+			return nil, fmt.Errorf("line %d: %q is not a step number 00-99", lineNo, fields[0])
+		}
+		n := 0
+		for _, f := range fields[1:] {
+			if len(f) != 2 {
+				break
+			}
+			v, err := strconv.ParseUint(f, 16, 8)
+			if err != nil {
+				break
+			}
+			mem[(step+n)%Steps] = byte(v)
+			n++
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("line %d: no hex code after step %02d", lineNo, step)
+		}
+		count += n
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, fmt.Errorf("no program steps found")
+	}
+	return &mem, nil
+}
+
+// FormatProgram writes program memory as a listing that ParseProgram can
+// read back. Trailing empty (00) steps are omitted.
+func FormatProgram(w io.Writer, title string, mem *[Steps]byte) error {
+	last := -1
+	for i := Steps - 1; i >= 0; i-- {
+		if mem[i] != 0 {
+			last = i
+			break
+		}
+	}
+	bw := bufio.NewWriter(w)
+	fmt.Fprintf(bw, "; %s\n; Odyssey2 Computer Intro! program listing\n; Step  Hex    Assembler\n", title)
+	for step := 0; step <= last; {
+		text, n := Disassemble(mem, step)
+		if step+n > Steps {
+			n = 1
+		}
+		hex := fmt.Sprintf("%02X", mem[step])
+		if n == 2 {
+			hex += fmt.Sprintf(" %02X", mem[step+1])
+		}
+		fmt.Fprintf(bw, "%02d    %-6s %s\n", step, hex, text)
+		step += n
+	}
+	return bw.Flush()
+}

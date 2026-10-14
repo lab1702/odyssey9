@@ -1,0 +1,61 @@
+; Area (Subroutine) (from the Computer Intro! manual)
+; Press E, base, height, then 1 = rectangle or 2 = triangle.
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 61 01  LDV.1.01
+04 62 02  LDV.2.02
+06 73     INP.3     base
+07 74     INP.4     height
+08 04     INA       1 or 2
+09 31 13  BEQ.1.13
+11 32 20  BEQ.2.20
+13 14 66  GTS.66
+15 B5     UNP.5
+16 C5     OUT.5
+17 C6     OUT.6
+18 12 58  GTO.58
+20 14 66  GTS.66
+22 00     NOP
+23 A3     STO.3
+24 64 02  LDV.4.02
+26 67 00  LDV.7.00
+28 94     LDA.4
+29 D3     SUB.3
+30 A3     STO.3
+31 97     LDA.7
+32 03     INC
+33 A7     STO.7
+34 93     LDA.3
+35 13 54  BRZ.54
+37 94     LDA.4
+38 53 42  BLS.3.42
+40 12 29  GTO.29
+42 97     LDA.7
+43 B8     UNP.8
+44 C8     OUT.8
+45 C9     OUT.9
+46 6E 10  LDV.E.10
+48 6F 13  LDV.F.13
+50 CE     OUT.E
+51 CF     OUT.F
+52 12 58  GTO.58
+54 97     LDA.7
+55 B8     UNP.8
+56 C8     OUT.8
+57 C9     OUT.9
+58 6E 0C  LDV.E.0C
+60 6F 0C  LDV.F.0C
+62 CE     OUT.E
+63 CF     OUT.F
+64 12 00  GTO.00
+66 93     LDA.3     multiply subroutine
+67 E3     ADD.3
+68 A5     STO.5
+69 94     LDA.4
+70 02     DEC
+71 A4     STO.4
+72 31 77  BEQ.1.77
+74 95     LDA.5
+75 12 67  GTO.67
+77 95     LDA.5
+78 07     RET

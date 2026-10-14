@@ -1,0 +1,12 @@
+; Creepy Crawler (from the Computer Intro! manual)
+; Press E. The little man buzzes about the screen.
+; Step  Hex    Assembler
+00 60 3A  LDV.0.3A  little man into Reg. 0
+02 61 0C  LDV.1.0C  blank into Reg. 1
+04 6B 00  LDV.B.00  position 00
+06 C0     OUT.0
+07 C1     OUT.1
+08 05     SIG       one second buzz
+09 08     RND
+10 BB     UNP.B     random position into Reg. B
+11 12 06  GTO.06
