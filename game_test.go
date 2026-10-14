@@ -79,6 +79,23 @@ func TestRunningProgramGetsEveryKey(t *testing.T) {
 	if g.m.Mode() != machine.ModeDisplay || len(g.keys) != 0 {
 		t.Errorf("after 5 RESET D: mode %v, %d keys queued; want DISPLAY and none", g.m.Mode(), len(g.keys))
 	}
+
+	// RESET still stops the program when the queue is full.
+	g.press(machine.KeyReset)
+	g.press(machine.KeyE)
+	tick(g)
+	if g.m.Mode() != machine.ModeExecute {
+		t.Fatalf("mode %v, want the program running", g.m.Mode())
+	}
+	for range maxQueued + 4 {
+		g.press(machine.KeyX)
+	}
+	tick(g)
+	g.press(machine.KeyReset)
+	tick(g)
+	if g.m.Mode() != machine.ModeCommand || len(g.keys) != 0 {
+		t.Errorf("RESET after a full queue: mode %v, %d keys queued; want COMMAND and none", g.m.Mode(), len(g.keys))
+	}
 }
 
 func TestScriptChoosesProgram(t *testing.T) {

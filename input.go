@@ -127,10 +127,14 @@ func (g *game) handleDrops() {
 	if err != nil || len(entries) == 0 {
 		return
 	}
+	if len(entries) > 1 {
+		g.showToast("Drop one program listing at a time")
+		return
+	}
 	name := entries[0].Name()
-	data, err := fs.ReadFile(files, name)
+	data, err := readListing(files.Open(name))
 	if err != nil {
-		g.showToast("Cannot read " + name)
+		g.showToast("Cannot read " + name + ": " + err.Error())
 		return
 	}
 	g.loadBytes(name, data, "drop:"+name, "Drop "+name+" again to replace your unsaved program")

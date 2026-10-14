@@ -1,0 +1,7 @@
+; Enter a Letter A (from the Computer Intro! manual)
+; Press E. The letter H appears on the screen.
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 60 1D  LDV.0.1D  H into Reg. 0
+04 C0     OUT.0
+05 71     INP.1     pause

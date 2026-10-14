@@ -66,13 +66,15 @@ Command-line options:
 | `-screenshot FILE` | testing aid: after the script has run, save a PNG of the window and quit (no sound) |
 
 If the emulator stops at start-up with an `oto:` or `audio:` error, your
-computer has no working sound output. Start it with `-mute`.
+computer has no working sound output. Start it with `-mute`. If the sound
+output fails while you have an unsaved program, the emulator saves it next
+to the SAVE file as `odyssey9-recovered-….txt` before it stops.
 
 A `-script` is typed one key at a time. Letters, digits and the symbols in
 the PC keyboard table stand for themselves. `{RESET}`, `{ENTER}`,
 `{CLEAR}`, `{YES}`, `{NO}` and `{SPACE}` press those keys. `{WAIT}`
 pauses, and `{HELP}`, `{PROGRAMS}` and `{SAVE}` work like the emulator's
-buttons. While a panel is open, keys go to it, so `{PROGRAMS}C` loads the
+buttons. While a panel is open, keys go to it, so `{PROGRAMS}E` loads the
 Message program. For example:
 
 ```sh
@@ -120,8 +122,8 @@ There is a row of buttons under the TV, and each one also has a function key:
   * SLOW: 4 steps/s, for watching a program work
   * NORMAL: 1000 steps/s
   * FAST
-* **PROGRAMS (F4)** loads any of the 12 programs printed in the manual.
-  Click one, or press its key (1–9, A–C). Esc closes this panel and the
+* **PROGRAMS (F4)** loads any of the 14 programs printed in the manual.
+  Click one, or press its key (1–9, A–E). Esc closes this panel and the
   help panel.
 * **SAVE (F2)** / **LOAD (F3)** write and read your program as a text
   listing. You can also drop a listing file onto the window. To keep you
@@ -152,6 +154,8 @@ manual's tables load as they are:
 30   1D 12 0E 0E 17 00  HELLO
 ```
 
+Each step may be given only once, and a line may not run past step 99.
+
 The manual's column headings and its remarks on lines of their own are not
 step lines: delete them, or start them with `;`. A remark straight after the
 bytes needs two spaces in front of it. Otherwise one that starts with a
@@ -160,7 +164,7 @@ hex-like word, such as `BE QUIET`, would be read as more bytes.
 ## How the computer behaves
 
 The manual doesn't spell out every detail, so some behaviour was worked out
-from its example programs. All 12 examples give the results the manual
+from its example programs. All 14 examples give the results the manual
 describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 `TAKE A LOOK` and the Area program computes `8 × 3 = 24`.
 

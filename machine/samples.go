@@ -19,8 +19,8 @@ func (s Sample) Program() *[Steps]byte {
 }
 
 // Samples are transcribed from the manual. Obvious misprints have been
-// corrected (e.g. Creepy Crawler II step 08 is OTA = 0B, not 0A; "Three Ways"
-// B step 02 is INP.0 = 70, not 50).
+// corrected (e.g. Creepy Crawler II step 08 is OTA = 0B, not 0A; Enter a
+// Letter B step 02 is INP.0 = 70, not 50).
 var Samples = []Sample{
 	{"Creepy Crawler", "Press E. The little man buzzes about the screen.", `
 00 60 3A  LDV.0.3A  little man into Reg. 0
@@ -295,10 +295,22 @@ var Samples = []Sample{
 77 27 75  BNE.7.75
 79 07     RET
 `},
-	{"Enter a Letter", "Press E, then any key; it appears on the screen.", `
+	{"Enter a Letter A", "Press E. The letter H appears on the screen.", `
+00 6B 00  LDV.B.00
+02 60 1D  LDV.0.1D  H into Reg. 0
+04 C0     OUT.0
+05 71     INP.1     pause
+`},
+	{"Enter a Letter B", "Press E, then any key; it appears on the screen.", `
 00 6B 00  LDV.B.00
 02 70     INP.0
 03 C0     OUT.0
+04 71     INP.1     pause
+`},
+	{"Enter a Letter C", "Press E, then any key; it goes to the screen through the accumulator.", `
+00 6B 00  LDV.B.00
+02 04     INA
+03 0B     OTA
 04 71     INP.1     pause
 `},
 	{"Six Letter Guess", "Press E, type a 6-letter word, then your opponent guesses letters.", `

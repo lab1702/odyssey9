@@ -1,4 +1,4 @@
-; Enter a Letter (from the Computer Intro! manual)
+; Enter a Letter B (from the Computer Intro! manual)
 ; Press E, then any key; it appears on the screen.
 ; Step  Hex    Assembler
 00 6B 00  LDV.B.00

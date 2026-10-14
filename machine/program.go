@@ -15,7 +15,8 @@ import (
 // of two or more spaces or a tab; anything after that (an assembler
 // mnemonic, a remark) is ignored, as is any text after ';' or '#'. Lines
 // may end in LF, CR LF or CR, and any other Unicode space counts as a
-// space. This accepts the listing format used in the manual:
+// space. Each step may be given only once, and a line may not run past
+// step 99. This accepts the listing format used in the manual:
 //
 //	04   6B 00  LDV.B.00   Set output position to 00
 func ParseProgram(r io.Reader) (*[Steps]byte, error) {
@@ -25,6 +26,7 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 		return nil, err
 	}
 	text := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(string(data))
+	var setOn [Steps]int // the line that gave each step, or 0
 	lineNo, count := 0, 0
 	for line := range strings.SplitSeq(text, "\n") {
 		lineNo++
@@ -55,7 +57,14 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 			if err != nil {
 				break
 			}
-			mem[(step+n)%Steps] = byte(v)
+			at := step + n
+			if at >= Steps {
+				return nil, fmt.Errorf("line %d: runs past step %02d", lineNo, Steps-1)
+			}
+			if setOn[at] != 0 {
+				return nil, fmt.Errorf("line %d: step %02d was already given on line %d", lineNo, at, setOn[at])
+			}
+			mem[at], setOn[at] = byte(v), lineNo
 			n++
 		}
 		if n == 0 {

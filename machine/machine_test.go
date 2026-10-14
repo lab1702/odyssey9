@@ -222,6 +222,20 @@ func TestAdditionC(t *testing.T) {
 	}
 }
 
+// The manual's three ways to enter and output a letter.
+func TestEnterALetter(t *testing.T) {
+	for name, keys := range map[string][]Key{
+		"Enter a Letter A": nil,
+		"Enter a Letter B": {KeyH},
+		"Enter a Letter C": {KeyH},
+	} {
+		m := runSample(t, name, keys...)
+		if got := screenText(m); got != "H          " {
+			t.Errorf("%s shows %q", name, got)
+		}
+	}
+}
+
 func TestMultiplication(t *testing.T) {
 	m := runSample(t, "Multiplication", Key3, Key7)
 	if got := screenText(m); got != "3*7=21     " {
@@ -629,6 +643,37 @@ func TestBuiltInGames(t *testing.T) {
 	m.Press(KeyNo)
 	if got := screenText(m); got != "03 07 50 02" {
 		t.Errorf("between NO got %q", got)
+	}
+}
+
+// Between the Sheets: YES is right about half the time, and the secret is
+// never one of the sheets.
+func TestBetweenSheetsOdds(t *testing.T) {
+	m := New()
+	m.Press(Key4)
+	g := m.game.(*betweenSheets)
+	inside := 0
+	for range 10000 {
+		g.newRound(m)
+		if g.secret == g.lo || g.secret == g.hi || g.secret < 0 || g.secret > 99 {
+			t.Fatalf("sheets %02d %02d, secret %d", g.lo, g.hi, g.secret)
+		}
+		if g.secret > g.lo && g.secret < g.hi {
+			inside++
+		}
+	}
+	if inside < 4500 || inside > 5500 {
+		t.Errorf("secret between the sheets %d times in 10000", inside)
+	}
+}
+
+// Flash Card's problem is shown as soon as it is set, not after a blink.
+func TestFlashCardShowsProblem(t *testing.T) {
+	m := New()
+	m.Press(Key2)
+	m.Update(100 * time.Millisecond)
+	if got := screenText(m); strings.TrimSpace(got) == "" {
+		t.Errorf("new problem not shown: %q", got)
 	}
 }
 

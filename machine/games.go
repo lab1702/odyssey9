@@ -85,7 +85,7 @@ func (g *flashCard) newProblem(m *Machine) {
 	g.answer = nil
 	g.solved = false
 	g.blinkOn = true
-	g.blink = 0
+	g.blink = 600 * time.Millisecond
 	m.clearScreen()
 	g.drawProblem(m, true)
 }
@@ -213,7 +213,14 @@ type betweenSheets struct {
 func (g *betweenSheets) newRound(m *Machine) {
 	g.lo = m.rng.Intn(80)
 	g.hi = g.lo + 2 + m.rng.Intn(18)
-	g.secret = m.rng.Intn(100)
+	// Half the time the secret lies between the sheets, so YES and NO are
+	// equally good guesses. It never equals a sheet, which would leave it
+	// unclear which side it is on.
+	if inside := g.hi - g.lo - 1; m.rng.Intn(2) == 0 {
+		g.secret = g.lo + 1 + m.rng.Intn(inside)
+	} else if g.secret = m.rng.Intn(100 - inside - 2); g.secret >= g.lo {
+		g.secret += inside + 2
+	}
 	g.waiting = true
 	m.clearScreen()
 	l1, l2 := digits(g.lo)

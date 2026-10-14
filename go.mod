@@ -6,7 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/hajimehoshi/ebiten/v2 v2.8.8
-	golang.org/x/image v0.38.0
+	golang.org/x/image v0.47.0
 )
 
 require (
@@ -16,7 +16,7 @@ require (
 	github.com/ebitengine/purego v0.8.0 // indirect
 	github.com/go-text/typesetting v0.2.0 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )

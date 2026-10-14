@@ -108,8 +108,9 @@ func (s *tone) wave() (v, target float64) {
 	return 0, 0
 }
 
-// newAudio starts the sound output. It returns nil, and the emulator runs
-// silently, if audio is disabled or the player can't be created.
+// newAudio starts the sound output, or returns nil if audio is disabled. A
+// missing or broken sound device isn't detected here: the audio library
+// reports it later, as an error that stops the game (see main).
 func newAudio(enabled bool) *tone {
 	if !enabled {
 		return nil

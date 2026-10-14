@@ -115,3 +115,89 @@ func TestLoadMarksProgramSaved(t *testing.T) {
 		t.Error("loaded program counts as unsaved")
 	}
 }
+
+func TestSaveThroughDanglingSymlink(t *testing.T) {
+	g := testGame(t)
+	real := filepath.Join(t.TempDir(), "real.txt")
+	if err := os.Symlink(real, g.file); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if fi, err := os.Lstat(g.file); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("SAVE replaced the symlink: %v", err)
+	}
+	if _, err := machine.ParseProgram(strings.NewReader(mustRead(t, real))); err != nil {
+		t.Fatalf("SAVE didn't create the link's target: %v", err)
+	}
+}
+
+func TestSaveKeepsHardLinks(t *testing.T) {
+	g := testGame(t)
+	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "other.txt")
+	if err := os.Link(g.file, other); err != nil {
+		t.Skip("no hard links:", err)
+	}
+	fi, err := os.Stat(g.file)
+	if err != nil || linkCount(fi) < 2 {
+		t.Skip("link count not reported")
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if mustRead(t, other) != mustRead(t, g.file) {
+		t.Error("SAVE broke the hard link")
+	}
+}
+
+func TestSaveInReadOnlyFolder(t *testing.T) {
+	g := testGame(t)
+	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(g.file)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	if f, err := os.CreateTemp(dir, "probe"); err == nil {
+		f.Close()
+		os.Remove(f.Name())
+		t.Skip("folder still writable (running as root?)")
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if p, err := machine.ParseProgram(strings.NewReader(mustRead(t, g.file))); err != nil || p[0] != 0x08 {
+		t.Fatalf("SAVE didn't write the file: %v", err)
+	}
+}
+
+func TestLoadRefusesHugeFile(t *testing.T) {
+	g := testGame(t)
+	big := strings.Repeat("; padding\n", maxListing/10+1) + "00 05\n"
+	if err := os.WriteFile(g.file, []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g.load()
+	if g.m.Mem[0] == 0x05 || !strings.Contains(g.toast, "too large") {
+		t.Errorf("LOAD of a %d-byte file: toast %q", len(big), g.toast)
+	}
+}
+
+func TestRecoveryKeepsProgram(t *testing.T) {
+	g := testGame(t)
+	typeStep(g, machine.Key0, machine.Key8)
+	name, err := g.saveRecovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(name) != filepath.Dir(g.file) {
+		t.Errorf("recovery file %s not next to %s", name, g.file)
+	}
+	p, err := machine.ParseProgram(strings.NewReader(mustRead(t, name)))
+	if err != nil || *p != g.m.Mem {
+		t.Errorf("recovery file doesn't hold the program: %v", err)
+	}
+}

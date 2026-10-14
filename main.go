@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"log"
@@ -38,12 +39,11 @@ func main() {
 
 	m := machine.New()
 	if *load != "" {
-		f, err := os.Open(*load)
+		data, err := readListing(os.Open(*load))
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("%s: %v", *load, err)
 		}
-		p, err := machine.ParseProgram(f)
-		f.Close()
+		p, err := machine.ParseProgram(bytes.NewReader(data))
 		if err != nil {
 			log.Fatalf("%s: %v", *load, err)
 		}
@@ -68,6 +68,14 @@ func main() {
 		// is running, as an error from the audio library.
 		if msg := err.Error(); sound && (strings.HasPrefix(msg, "oto:") || strings.HasPrefix(msg, "audio:")) {
 			fmt.Fprintln(os.Stderr, "The sound output failed. Run with -mute to start without sound.")
+		}
+		// The error stops the emulator without asking, so keep the program.
+		if g.unsaved() {
+			if name, err := g.saveRecovery(); err != nil {
+				fmt.Fprintln(os.Stderr, "Your unsaved program could not be kept:", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "Your unsaved program was saved in", name)
+			}
 		}
 		os.Exit(1)
 	}

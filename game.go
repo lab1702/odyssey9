@@ -174,11 +174,17 @@ func (g *game) confirm(action, prompt string) bool {
 }
 
 // press queues a key for the console. deliverKeys passes the queued keys
-// on in order.
+// on in order. RESET is queued even when the queue is full, so that it can
+// always stop a running program.
 func (g *game) press(k machine.Key) {
 	g.keyLit[k] = keyLitFrames
-	if g.power && len(g.keys) < maxQueued {
+	if !g.power {
+		return
+	}
+	if len(g.keys) < maxQueued {
 		g.keys = append(g.keys, k)
+	} else if k == machine.KeyReset {
+		g.keys[len(g.keys)-1] = k
 	}
 }
 

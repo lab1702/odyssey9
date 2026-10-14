@@ -1,0 +1,7 @@
+; Enter a Letter C (from the Computer Intro! manual)
+; Press E, then any key; it goes to the screen through the accumulator.
+; Step  Hex    Assembler
+00 6B 00  LDV.B.00
+02 04     INA
+03 0B     OTA
+04 71     INP.1     pause

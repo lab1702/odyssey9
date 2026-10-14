@@ -91,7 +91,9 @@ func (g *game) drawHelp(c canvas) {
 	for i, line := range helpText {
 		kind := fontRegular
 		col := rgb(0x2A2722)
-		if line == strings.ToUpper(line) && line != "" && !strings.HasPrefix(line, " ") {
+		// A heading is in capitals, though a note after it may not be.
+		heading, _, _ := strings.Cut(line, "  (")
+		if heading == strings.ToUpper(heading) && heading != "" && !strings.HasPrefix(heading, " ") {
 			kind, col = fontBold, rgb(0xC0392B)
 		}
 		c.text(line, kind, 13, x+24, y+64+float32(i)*22, col, -1)

@@ -37,3 +37,21 @@ func TestParseProgramStepNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestParseProgramOverlaps(t *testing.T) {
+	for _, src := range []string{
+		"99 01 02\n", // past step 99
+		"00 60 90\n98 12 05 77\n",
+		"00 60 05\n01 61\n", // step 01 given twice
+		"04 C0\n00 60 05\n04 C1\n",
+	} {
+		if _, err := ParseProgram(strings.NewReader(src)); err == nil {
+			t.Errorf("%q accepted", src)
+		}
+	}
+	// Lines may still come in any order.
+	p, err := ParseProgram(strings.NewReader("02 C0\n00 60 05\n"))
+	if err != nil || p[0] != 0x60 || p[2] != 0xC0 {
+		t.Errorf("steps out of order: %v", err)
+	}
+}
