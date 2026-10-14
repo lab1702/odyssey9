@@ -79,6 +79,8 @@ type game struct {
 	keys     []machine.Key // typed keys on their way to the console, oldest first
 	held     int           // how many of them were left waiting for a program
 	buttons  []button
+	bg       *ebiten.Image // drawBackground's picture, at scale bgScale
+	bgScale  float32
 	power    bool
 	last     time.Time
 	frame    int
@@ -340,5 +342,5 @@ func (g *game) togglePower() {
 	}
 	g.power = !g.power
 	g.m.PowerOn() // switching off erases the program, as on the real console
-	g.keys = g.keys[:0]
+	g.keys, g.held = g.keys[:0], 0
 }

@@ -4,6 +4,7 @@ package main
 
 import "io/fs"
 
-// linkCount returns the number of hard links to a file. Only Unix reports
-// it, so elsewhere a file is taken to have one.
-func linkCount(fi fs.FileInfo) uint64 { return 1 }
+// replaceable reports whether a file can be replaced by a new one without
+// anything but its contents changing. Only Unix reports hard links and
+// owners, so elsewhere a file is taken to be replaceable.
+func replaceable(fi fs.FileInfo) bool { return true }

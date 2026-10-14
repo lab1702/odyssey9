@@ -24,6 +24,10 @@ var fnKeys = map[ebiten.Key]buttonID{
 }
 
 func (g *game) handleShortcuts() {
+	// A function key with a modifier is the system's, such as Alt+F4.
+	if ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyMeta) {
+		return
+	}
 	for _, k := range inpututil.AppendJustPressedKeys(nil) {
 		if id, ok := fnKeys[k]; ok {
 			g.clickButton(id)

@@ -79,7 +79,8 @@ var (
 	colRed       = rgb(0xE8222A)
 )
 
-func (g *game) drawKeyboard(c canvas) {
+// drawKeyboard draws the keyboard with no key pressed.
+func drawKeyboard(c canvas) {
 	c.rrect(kbX-6, kbY-6, kbW+12, kbH+12, 6, rgb(0xE9E6DD))
 	c.rect(kbX, kbY, kbW, kbH, colPanel)
 
@@ -110,24 +111,37 @@ func (g *game) drawKeyboard(c canvas) {
 	}
 
 	for _, k := range keyCaps {
-		face, ink := colKeyFace, colKeyLabel
-		if k.key == machine.KeyReset {
-			face = colRed
-		}
-		if g.keyLit[k.key] > 0 {
-			face = colKeyDown
-		}
-		c.rrect(k.x, k.y, k.w, k.h, 5, face)
-		size := float32(17)
-		if utf8.RuneCountInString(k.label) > 1 && k.key != machine.KeyQuestion {
-			size = 10
-		}
-		if k.key == machine.KeyReset {
-			c.text("▲", fontBold, 15, k.x+k.w/2, k.y+k.h/2, ink, 0)
-			continue
-		}
-		c.text(k.label, fontBold, size, k.x+k.w/2, k.y+k.h/2+1, ink, 0)
+		k.draw(c, false)
 	}
+}
+
+// drawLitKeys draws the keys shown pressed over the background.
+func (g *game) drawLitKeys(c canvas) {
+	for _, k := range keyCaps {
+		if g.keyLit[k.key] > 0 {
+			k.draw(c, true)
+		}
+	}
+}
+
+func (k *keyCap) draw(c canvas, lit bool) {
+	face, ink := colKeyFace, colKeyLabel
+	if k.key == machine.KeyReset {
+		face = colRed
+	}
+	if lit {
+		face = colKeyDown
+	}
+	c.rrect(k.x, k.y, k.w, k.h, 5, face)
+	if k.key == machine.KeyReset {
+		c.text("▲", fontBold, 15, k.x+k.w/2, k.y+k.h/2, ink, 0)
+		return
+	}
+	size := float32(17)
+	if utf8.RuneCountInString(k.label) > 1 && k.key != machine.KeyQuestion {
+		size = 10
+	}
+	c.text(k.label, fontBold, size, k.x+k.w/2, k.y+k.h/2+1, ink, 0)
 }
 
 // keyAt returns the key under a logical point.

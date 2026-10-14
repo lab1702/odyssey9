@@ -49,10 +49,16 @@ func TestSaveKeepsFileMode(t *testing.T) {
 	if err := os.Chmod(g.file, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Windows only reports whether a file is read-only, so compare with
+	// what is reported rather than with 0600.
+	before, err := os.Stat(g.file)
+	if err != nil {
+		t.Fatal(err)
+	}
 	typeStep(g, machine.Key0, machine.Key8)
 	saveConfirmed(t, g)
-	if fi, err := os.Stat(g.file); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("mode after SAVE = %v, %v; want -rw-------", fi.Mode(), err)
+	if fi, err := os.Stat(g.file); err != nil || fi.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("mode after SAVE = %v, %v; want %v", fi.Mode(), err, before.Mode())
 	}
 }
 
@@ -132,6 +138,34 @@ func TestSaveThroughDanglingSymlink(t *testing.T) {
 	}
 }
 
+// A relative link's ".." leaves the folder the link is really in, even when
+// that folder was reached through another link.
+func TestSaveThroughDanglingSymlinkInLinkedFolder(t *testing.T) {
+	root := t.TempDir()
+	progs := filepath.Join(root, "data", "progs")
+	for _, dir := range []string{progs, filepath.Join(root, "data", "other"), filepath.Join(root, "home", "other")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linkdir := filepath.Join(root, "home", "linkdir")
+	if err := os.Symlink(progs, linkdir); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	if err := os.Symlink(filepath.Join("..", "other", "x.txt"), filepath.Join(progs, "prog.txt")); err != nil {
+		t.Fatal(err)
+	}
+	g := newGame(machine.New(), filepath.Join(linkdir, "prog.txt"), false)
+	typeStep(g, machine.Key0, machine.Key8)
+	saveConfirmed(t, g)
+	if _, err := os.Stat(filepath.Join(root, "home", "other", "x.txt")); err == nil {
+		t.Error("SAVE wrote to the wrong folder")
+	}
+	if _, err := machine.ParseProgram(strings.NewReader(mustRead(t, filepath.Join(root, "data", "other", "x.txt")))); err != nil {
+		t.Fatalf("SAVE didn't create the link's target: %v", err)
+	}
+}
+
 func TestSaveKeepsHardLinks(t *testing.T) {
 	g := testGame(t)
 	if err := os.WriteFile(g.file, []byte("00 05\n"), 0o644); err != nil {
@@ -142,7 +176,7 @@ func TestSaveKeepsHardLinks(t *testing.T) {
 		t.Skip("no hard links:", err)
 	}
 	fi, err := os.Stat(g.file)
-	if err != nil || linkCount(fi) < 2 {
+	if err != nil || replaceable(fi) {
 		t.Skip("link count not reported")
 	}
 	typeStep(g, machine.Key0, machine.Key8)

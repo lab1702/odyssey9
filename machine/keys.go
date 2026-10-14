@@ -57,7 +57,9 @@ const (
 	keyCount
 )
 
-// keyCodes is the "Key Codes" table from the manual's front gatefold.
+// keyCodes is the "Key Codes" table from the manual's front gatefold. The
+// table misprints Z as "31 / 32" (31 is the ball, and 32 decimal is A): Z's
+// character is 21, as in the glyph table in font.go.
 var keyCodes = [keyCount]byte{
 	Key0: 0x00, Key1: 0x01, Key2: 0x02, Key3: 0x03, Key4: 0x04,
 	Key5: 0x05, Key6: 0x06, Key7: 0x07, Key8: 0x08, Key9: 0x09,

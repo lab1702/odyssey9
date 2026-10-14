@@ -83,7 +83,8 @@ func (g *game) save() {
 // points to is written, and an existing file keeps its permissions. A new
 // file is created directly, with permissions set by the umask. A file that
 // can't be opened for writing, such as a read-only one, is left alone. A
-// file with other hard links, or in a folder where no temporary file can be
+// file with other hard links or another owner, or one that can't be
+// replaced by renaming, such as in a folder where no temporary file can be
 // made, is rewritten in place instead, so that it stays the same file.
 func writeFileAtomic(name string, data []byte) error {
 	name = followLinks(name)
@@ -99,7 +100,7 @@ func writeFileAtomic(name string, data []byte) error {
 	if err := checkWritable(name); err != nil {
 		return err
 	}
-	if linkCount(fi) > 1 {
+	if !replaceable(fi) {
 		return writeFile(name, data, os.O_TRUNC)
 	}
 	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
@@ -121,6 +122,10 @@ func writeFileAtomic(name string, data []byte) error {
 	}
 	if err == nil {
 		err = os.Rename(f.Name(), name)
+		if errors.Is(err, fs.ErrPermission) {
+			os.Remove(f.Name())
+			return writeFile(name, data, os.O_TRUNC)
+		}
 	}
 	if err != nil {
 		os.Remove(f.Name())
@@ -166,7 +171,13 @@ func followLinks(name string) string {
 			break
 		}
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(name), target)
+			// Resolve the link's folder first, as the system does: a ".."
+			// in target leaves the real folder, not the path to a link.
+			dir := filepath.Dir(name)
+			if d, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = d
+			}
+			target = filepath.Join(dir, target)
 		}
 		name = target
 	}

@@ -4,13 +4,17 @@ package main
 
 import (
 	"io/fs"
+	"os"
 	"syscall"
 )
 
-// linkCount returns the number of hard links to a file.
-func linkCount(fi fs.FileInfo) uint64 {
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return uint64(st.Nlink)
+// replaceable reports whether a file can be replaced by a new one without
+// anything but its contents changing: it has no other hard links, and a new
+// file made by this user would have the same owner and group.
+func replaceable(fi fs.FileInfo) bool {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return true
 	}
-	return 1
+	return st.Nlink == 1 && int(st.Uid) == os.Geteuid() && int(st.Gid) == os.Getegid()
 }

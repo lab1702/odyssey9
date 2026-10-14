@@ -99,6 +99,25 @@ func TestRunningProgramGetsEveryKey(t *testing.T) {
 	}
 }
 
+// Keys left waiting for a program when the power goes off don't count
+// against the first key typed after it comes back on.
+func TestPowerOffDropsWaitingKeys(t *testing.T) {
+	g := testGame(t)
+	g.m.LoadProgram(&[machine.Steps]byte{0x12, 0x00}) // GTO.00
+	g.clean = g.m.Mem
+	g.press(machine.KeyE)
+	tick(g)
+	g.press(machine.Key5) // waits, as the program never reads a key
+	tick(g)
+	g.togglePower()
+	g.togglePower()
+	g.press(machine.KeyReset)
+	tick(g)
+	if g.m.Mode() != machine.ModeCommand {
+		t.Errorf("mode %v after power on and RESET; want COMMAND", g.m.Mode())
+	}
+}
+
 func TestScriptChoosesProgram(t *testing.T) {
 	g := testGame(t)
 	keys, err := parseScript("{PROGRAMS}C")

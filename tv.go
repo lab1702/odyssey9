@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -32,9 +33,10 @@ const (
 func (g *game) Draw(screen *ebiten.Image) {
 	c := canvas{screen, g.scale}
 	screen.Fill(rgb(0x2A2622))
+	g.drawBackground(c)
 	g.drawTV(c)
 	g.drawButtons(c)
-	g.drawKeyboard(c)
+	g.drawLitKeys(c)
 	if g.monitor {
 		g.drawMonitor(c)
 	}
@@ -51,11 +53,35 @@ func (g *game) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (g *game) drawTV(c canvas) {
+// drawBackground draws the parts of the window that never change: the TV
+// cabinet and the keyboard with no key pressed. They are drawn once for
+// each scale and kept, as their antialiased shapes would take a good part
+// of every frame to draw.
+func (g *game) drawBackground(c canvas) {
+	if g.bg == nil || g.bgScale != c.s {
+		if g.bg != nil {
+			g.bg.Deallocate()
+		}
+		g.bg = ebiten.NewImage(int(math.Ceil(baseW*float64(c.s))), int(math.Ceil(baseH*float64(c.s))))
+		g.bgScale = c.s
+		bc := canvas{g.bg, c.s}
+		drawCabinet(bc)
+		drawKeyboard(bc)
+	}
+	c.dst.DrawImage(g.bg, nil)
+}
+
+func drawCabinet(c canvas) {
 	// cabinet and bezel
 	c.rrect(tvX, tvY, tvW, tvH, 18, rgb(0x161412))
 	c.rrect(tvX+8, tvY+8, tvW-16, tvH-16, 14, rgb(0x3B3631))
 	c.rrect(scrX-10, scrY-10, scrW+20, scrH+20, 26, rgb(0x0C0B0A))
+	// nameplate
+	c.text("ODYSSEY²", fontBold, 15, tvX+40, tvY+tvH-22, rgb(0xD8D2C4), -1)
+	c.text("COMPUTER INTRO!  ·  VIDEOPAC 9", fontRegular, 12, tvX+140, tvY+tvH-22, rgb(0x9C958A), -1)
+}
+
+func (g *game) drawTV(c canvas) {
 	bg := rgb(0x0A0F24)
 	if !g.power {
 		bg = rgb(0x060606)
@@ -105,9 +131,7 @@ func (g *game) drawTV(c canvas) {
 		c.rect(scrX+4, y, scrW-8, 1, color.RGBA{0, 0, 0, 0x30})
 	}
 
-	// nameplate and power light
-	c.text("ODYSSEY²", fontBold, 15, tvX+40, tvY+tvH-22, rgb(0xD8D2C4), -1)
-	c.text("COMPUTER INTRO!  ·  VIDEOPAC 9", fontRegular, 12, tvX+140, tvY+tvH-22, rgb(0x9C958A), -1)
+	// power light and speed
 	led := rgb(0x401010)
 	if g.power {
 		led = rgb(0xFF3030)

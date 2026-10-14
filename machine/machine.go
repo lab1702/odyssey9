@@ -550,6 +550,7 @@ func (m *Machine) Step() {
 	case opSIG:
 		m.play(SoundBuzz, time.Second)
 		m.blockLeft = time.Second
+		m.budget = 0 // this frame's other steps aren't owed after the second
 	case opRET:
 		m.PC = m.S
 	case opRND:

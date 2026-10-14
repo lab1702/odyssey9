@@ -614,6 +614,25 @@ func TestSpeedChangeDuringSig(t *testing.T) {
 	}
 }
 
+// Steps owed for the frame in which SIG ran must not run all at once when
+// its second is up.
+func TestNoBurstAfterSig(t *testing.T) {
+	var prog [Steps]byte
+	prog[0] = 0x05 // SIG
+	for i := 1; i < Steps; i++ {
+		prog[i] = 0x03 // INC
+	}
+	m := New()
+	m.LoadProgram(&prog)
+	m.SetSpeed(SpeedNormal)
+	m.Press(KeyE)
+	m.Update(time.Second / 60)
+	m.Update(time.Second)
+	if m.PC != 1 {
+		t.Errorf("PC=%02d right after the SIG second; want 01", m.PC)
+	}
+}
+
 func TestBuiltInGames(t *testing.T) {
 	m := New()
 	m.Press(Key3) // Computer Telepathy from the title screen
