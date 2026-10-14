@@ -51,6 +51,8 @@ To run the tests: `go test ./machine`. They run the programs from the manual
 and check what ends up on the screen. They also check that `examples/`
 matches the programs in `machine/samples.go`. After changing a sample,
 regenerate the listings with `ODYSSEY9_EXPORT=../examples go test ./machine`.
+`go test ./...` also tests the window code. Ebitengine needs a display for
+that, so on a headless Linux machine run it under `xvfb-run`.
 
 Command-line options:
 
@@ -93,7 +95,7 @@ Follow the manual. At power-on the screen says **SELECT GAME**:
 * In **Roll** mode, `U` and `D` move through the steps. `CLEAR` returns to
   Program mode, so you can then press `M`/`A` and `I` to overwrite a step.
 * Switching the power off (POWER button / F8) erases the program, just like
-  the real console.
+  the real console. If you haven't saved it, press POWER twice.
 
 ### PC keyboard
 
@@ -106,7 +108,7 @@ Follow the manual. At power-on the screen says **SELECT GAME**:
 | Enter | ENTER |
 | Delete | CLEAR |
 | Esc | RESET |
-| Backspace | erases the last character you typed in Input mode (otherwise CLEAR) |
+| Backspace | erases the last character you typed in Input mode, repeating while held (otherwise CLEAR) |
 
 ### Emulator controls
 
@@ -121,7 +123,12 @@ There is a row of buttons under the TV, and each one also has a function key:
   Click one, or press its key (1–9, A–C). Esc closes this panel and the
   help panel.
 * **SAVE (F2)** / **LOAD (F3)** write and read your program as a text
-  listing. You can also drop a listing file onto the window.
+  listing. You can also drop a listing file onto the window. To keep you
+  from losing work, a few actions only happen when repeated within four
+  seconds:
+  * a SAVE that would replace a different program in the file
+  * a LOAD, dropped file or PROGRAMS choice that would replace a program
+    you haven't saved
 * **MONITOR (F6)** opens a side panel showing the registers, the accumulator,
   the program counter and a disassembly of program memory.
 * **F7** colours the characters the way the manual's symbol chart does.
@@ -158,6 +165,8 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 * **Step numbers are decimal.** `GTO.15` is coded `12 15`, and `ADD`, `SUB`,
   `INC` and `DEC` work in decimal. That is why `9+9` unpacks to the digits
   1 and 8, and why Creepy Crawler II's `13 + digit` lands on steps 13–22.
+  The assembler rejects a branch target that isn't a step number, such as
+  `GTO.A5`. `LDV` still takes any hex value.
 * **`SUB.R`** works out *register − accumulator*. `DEC` takes 00 down to 99.
   `BDB` branches when the accumulator's high digit is 9, and `BDC` when it
   is not 0.

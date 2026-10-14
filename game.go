@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -42,6 +43,9 @@ type game struct {
 	overlay  string // "", "help", "programs"
 	toast    string
 	toastFor time.Duration
+	clean    [machine.Steps]byte // the program as last saved or loaded
+	pending  string              // action waiting to be confirmed by repeating it
+	pendFor  time.Duration
 	keyLit   map[machine.Key]int // frames left to show a key as pressed
 	mouseKey machine.Key
 	buttons  []button
@@ -54,10 +58,12 @@ type game struct {
 	shotWait int
 	shotNow  bool
 	quit     bool
+	quitErr  error // reported when quitting
 }
 
 func newGame(m *machine.Machine, file string, sound bool) *game {
 	g := &game{m: m, file: file, keyLit: map[machine.Key]int{}, scale: 1, power: true}
+	g.clean = m.Mem
 	g.snd = newAudio(sound)
 	x := float32(20)
 	for _, id := range []string{"POWER", "SPEED", "PROGRAMS", "SAVE", "LOAD", "MONITOR", "HELP"} {
@@ -113,6 +119,24 @@ func (g *game) showToast(s string) {
 	g.toast, g.toastFor = s, 4*time.Second
 }
 
+// unsaved reports whether program memory holds work that would be lost if
+// it were erased or replaced.
+func (g *game) unsaved() bool {
+	return g.m.Mem != g.clean && g.m.Mem != [machine.Steps]byte{}
+}
+
+// confirm reports whether action was requested a second time within a few
+// seconds. The first time, it shows prompt and returns false.
+func (g *game) confirm(action, prompt string) bool {
+	if g.pending == action && g.pendFor > 0 {
+		g.pending = ""
+		return true
+	}
+	g.pending, g.pendFor = action, 4*time.Second
+	g.showToast(prompt)
+	return false
+}
+
 func (g *game) press(k machine.Key) {
 	g.keyLit[k] = 8
 	if !g.power {
@@ -130,6 +154,9 @@ func (g *game) Update() error {
 	g.last = now
 	g.frame++
 	if g.quit {
+		if g.quitErr != nil {
+			return g.quitErr
+		}
 		return errQuit
 	}
 	g.runScript()
@@ -144,20 +171,23 @@ func (g *game) Update() error {
 	if g.toastFor > 0 {
 		g.toastFor -= dt
 	}
+	if g.pendFor > 0 {
+		g.pendFor -= dt
+	}
 
 	g.handleShortcuts()
 	g.handleMouse()
 	g.handleDrops()
 
 	if g.overlay == "" {
-		keys, bs := pollKeyboard()
+		keys, bs, held := pollKeyboard()
 		for _, k := range keys {
 			g.press(k)
 		}
 		if bs && g.power {
 			if g.m.Mode() == machine.ModeInput {
 				g.m.Backspace()
-			} else {
+			} else if !held { // only erasing repeats, not CLEAR
 				g.press(machine.KeyClear)
 			}
 		}
@@ -219,10 +249,12 @@ func (g *game) toggleMonitor() {
 }
 
 func (g *game) togglePower() {
-	g.power = !g.power
-	if g.power {
-		g.m.PowerOn()
+	if g.power && g.unsaved() &&
+		!g.confirm("power", "Press POWER again to switch off and erase your unsaved program") {
+		return
 	}
+	g.power = !g.power
+	g.m.PowerOn() // switching off erases the program, as on the real console
 }
 
 func (g *game) cursor() (float32, float32) {
@@ -288,33 +320,81 @@ func (g *game) handleDrops() {
 	if err != nil || len(entries) == 0 {
 		return
 	}
-	data, err := fs.ReadFile(files, entries[0].Name())
+	name := entries[0].Name()
+	data, err := fs.ReadFile(files, name)
 	if err != nil {
-		g.showToast("Cannot read " + entries[0].Name())
+		g.showToast("Cannot read " + name)
 		return
 	}
-	g.loadBytes(entries[0].Name(), data)
+	g.loadBytes(name, data, "drop:"+name, "Drop "+name+" again to replace your unsaved program")
 }
 
-func (g *game) loadBytes(name string, data []byte) {
+// loadBytes loads a listing. If that would replace an unsaved program, the
+// user must first repeat the action, which is named by action and prompt.
+func (g *game) loadBytes(name string, data []byte, action, prompt string) {
 	p, err := machine.ParseProgram(bytes.NewReader(data))
 	if err != nil {
 		g.showToast(name + ": " + err.Error())
 		return
 	}
-	g.power = true
-	g.m.LoadProgram(p)
+	if !g.replace(p, action, prompt) {
+		return
+	}
 	g.showToast("Loaded " + name + " — press E to execute")
 }
 
+// replace puts program p into memory, unless that would lose an unsaved
+// program and the user hasn't confirmed it yet.
+func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
+	if g.unsaved() && *p != g.m.Mem && !g.confirm(action, prompt) {
+		return false
+	}
+	g.power = true
+	g.m.LoadProgram(p)
+	g.clean = *p
+	return true
+}
+
 func (g *game) save() {
+	// Saving over a file that holds a different program needs confirming.
+	if old, err := os.ReadFile(g.file); err == nil {
+		p, err := machine.ParseProgram(bytes.NewReader(old))
+		if (err != nil || *p != g.m.Mem) &&
+			!g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
+			return
+		}
+	}
 	var buf bytes.Buffer
 	machine.FormatProgram(&buf, "Saved "+time.Now().Format("2006-01-02 15:04"), &g.m.Mem)
-	if err := os.WriteFile(g.file, buf.Bytes(), 0o644); err != nil {
+	if err := writeFileAtomic(g.file, buf.Bytes()); err != nil {
 		g.showToast("Save failed: " + err.Error())
 		return
 	}
+	g.clean = g.m.Mem
 	g.showToast("Saved to " + g.file)
+}
+
+// writeFileAtomic writes data to a temporary file next to name and then
+// renames it, so a crash part-way through never leaves name truncated.
+func writeFileAtomic(name string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), name)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
 }
 
 func (g *game) load() {
@@ -323,13 +403,14 @@ func (g *game) load() {
 		g.showToast("Load failed: " + err.Error())
 		return
 	}
-	g.loadBytes(g.file, data)
+	g.loadBytes(g.file, data, "load", "Press LOAD again to replace your unsaved program")
 }
 
 func (g *game) loadSample(i int) {
 	s := machine.Samples[i]
-	g.power = true
-	g.m.LoadProgram(s.Program())
+	if !g.replace(s.Program(), fmt.Sprint("sample:", i), "Choose "+s.Name+" again to replace your unsaved program") {
+		return
+	}
 	g.overlay = ""
 	g.showToast(s.Name + " loaded. " + s.Usage)
 }
@@ -369,6 +450,7 @@ func (g *game) Draw(screen *ebiten.Image) {
 	case "programs":
 		g.drawPrograms(c)
 	}
+	g.drawToast(c)
 	if g.shotNow {
 		g.shotNow = false
 		g.takeScreenshot(screen)
@@ -436,16 +518,29 @@ func (g *game) drawTV(c canvas) {
 	}
 	c.circle(tvX+tvW-44, tvY+tvH-22, 6, led)
 	c.text(machine.Speeds[g.m.Speed()].Name, fontMono, 11, tvX+tvW-60, tvY+tvH-22, rgb(0x9C958A), 1)
+}
 
-	if g.toastFor > 0 && g.toast != "" {
-		w := c.textWidth(g.toast, fontRegular, 13) + 24
-		if w > scrW-20 {
-			w = scrW - 20
-		}
-		x := float32(scrX) + (scrW-w)/2
-		c.rrect(x, scrY+scrH-38, w, 26, 8, rgba(0x000000, 0xD0))
-		c.text(g.toast, fontRegular, 13, x+w/2, scrY+scrH-25, rgb(0xFFFFFF), 0)
+// drawToast shows the current message at the bottom of the TV screen, or
+// under an open panel. A message too long to fit loses its middle, so the
+// end of a file name stays readable.
+func (g *game) drawToast(c canvas) {
+	if g.toastFor <= 0 || g.toast == "" {
+		return
 	}
+	const maxW = scrW - 20
+	text := g.toast
+	for r := []rune(text); c.textWidth(text, fontRegular, 13)+24 > maxW && len(r) > 1; {
+		mid := len(r) / 2
+		r = append(r[:mid], r[mid+1:]...)
+		text = string(r[:mid]) + "…" + string(r[mid:])
+	}
+	w := c.textWidth(text, fontRegular, 13) + 24
+	x, y := float32(scrX)+(scrW-w)/2, float32(scrY+scrH-38)
+	if g.overlay != "" {
+		x, y = (baseW-w)/2, baseH-46
+	}
+	c.rrect(x, y, w, 26, 8, rgba(0x000000, 0xD0))
+	c.text(text, fontRegular, 13, x+w/2, y+13, rgb(0xFFFFFF), 0)
 }
 
 func (g *game) drawButtons(c canvas) {

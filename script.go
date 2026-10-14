@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/png"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -26,25 +28,33 @@ const (
 	scriptSave     machine.Key = -3
 )
 
-func parseScript(s string) []machine.Key {
+func parseScript(s string) ([]machine.Key, error) {
 	var keys []machine.Key
-	for len(s) > 0 {
+	for s != "" {
 		if s[0] == '{' {
-			if end := strings.IndexByte(s, '}'); end > 0 {
-				keys = append(keys, scriptWords[strings.ToUpper(s[1:end])])
-				s = s[end+1:]
-				continue
+			end := strings.IndexByte(s, '}')
+			if end < 0 {
+				return nil, fmt.Errorf("script: missing } after %q", s)
 			}
+			k, ok := scriptWords[strings.ToUpper(s[1:end])]
+			if !ok {
+				return nil, fmt.Errorf("script: unknown key %q", s[:end+1])
+			}
+			keys = append(keys, k)
+			s = s[end+1:]
+			continue
 		}
-		r := rune(s[0])
-		s = s[1:]
+		r, size := utf8.DecodeRuneInString(s)
+		s = s[size:]
 		if k := machine.KeyForLetter(r); k != machine.KeyNone {
 			keys = append(keys, k)
 		} else if k, ok := typedKeys[r]; ok {
 			keys = append(keys, k)
+		} else {
+			return nil, fmt.Errorf("script: no key for %q", r)
 		}
 	}
-	return keys
+	return keys, nil
 }
 
 // runScript feeds one scripted key every few frames.
@@ -78,8 +88,13 @@ func (g *game) takeScreenshot(screen *ebiten.Image) {
 	screen.ReadPixels(img.Pix)
 	f, err := os.Create(g.shotPath)
 	if err == nil {
-		png.Encode(f, img)
-		f.Close()
+		err = png.Encode(f, img)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		g.quitErr = fmt.Errorf("screenshot: %w", err)
 	}
 	g.quit = true
 }

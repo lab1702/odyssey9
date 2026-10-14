@@ -151,6 +151,15 @@ func Assemble(src string) ([]byte, error) {
 		}
 		return byte(v), nil
 	}
+	// Branch and subroutine targets are step numbers, written in decimal
+	// (GTO.15 is coded 12 15). LDV's operand is a value and may be any hex.
+	step := func(s string) (byte, error) {
+		n, err := val(s)
+		if err == nil && (n>>4 > 9 || n&0x0F > 9) {
+			err = fmt.Errorf("step must be 00-99, got %q", s)
+		}
+		return n, err
+	}
 	switch o.form {
 	case formR:
 		r, err := reg(parts[1])
@@ -159,7 +168,7 @@ func Assemble(src string) ([]byte, error) {
 		}
 		return []byte{o.op | r}, nil
 	case formNN:
-		n, err := val(parts[1])
+		n, err := step(parts[1])
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +178,11 @@ func Assemble(src string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		n, err := val(parts[2])
+		operand := step
+		if o.mnemonic == "LDV" {
+			operand = val
+		}
+		n, err := operand(parts[2])
 		if err != nil {
 			return nil, err
 		}

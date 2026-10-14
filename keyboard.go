@@ -149,8 +149,8 @@ var typedKeys = map[rune]machine.Key{
 
 // pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
 // this frame. Backspace is reported separately because it is an emulator
-// editing aid rather than an Odyssey2 key.
-func pollKeyboard() (keys []machine.Key, backspace bool) {
+// editing aid rather than an Odyssey2 key; repeat says it is being held.
+func pollKeyboard() (keys []machine.Key, backspace, repeat bool) {
 	for _, r := range ebiten.AppendInputChars(nil) {
 		if k := machine.KeyForLetter(r); k != machine.KeyNone {
 			keys = append(keys, k)
@@ -166,9 +166,11 @@ func pollKeyboard() (keys []machine.Key, backspace bool) {
 			keys = append(keys, machine.KeyReset)
 		case ebiten.KeyDelete:
 			keys = append(keys, machine.KeyClear)
-		case ebiten.KeyBackspace:
-			backspace = true
 		}
 	}
-	return keys, backspace
+	// Backspace repeats while held, like typed characters: after half a
+	// second, 15 times a second.
+	d := inpututil.KeyPressDuration(ebiten.KeyBackspace)
+	backspace = d == 1 || d >= 30 && (d-30)%4 == 0
+	return keys, backspace, d > 1
 }

@@ -1,6 +1,9 @@
 package machine
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // game is one of the four programs built into the cartridge, started by
 // pressing 1-4 from the title screen or the Command mode.
@@ -197,8 +200,9 @@ func (g *telepathy) tick(m *Machine, dt time.Duration) {}
 // --- 4: Between the Sheets -------------------------------------------------
 // Two numbers (the sheets) and your score are shown, e.g. 03 07 00. Press YES
 // if you think the computer's secret number lies between the sheets, NO if
-// not. A right answer scores a point and the secret appears between the
-// sheets; a wrong one earns a couple of beeps.
+// not. A right answer scores a point and the secret appears in its place
+// among the sheets (03 05 07 01, or 03 07 50 01 after a right NO); a wrong
+// one earns a couple of beeps.
 
 type betweenSheets struct {
 	lo, hi, secret, score int
@@ -231,11 +235,13 @@ func (g *betweenSheets) key(m *Machine, k Key) {
 	g.pause = 2 * time.Second
 	if between == (k == KeyYes) {
 		g.score = (g.score + 1) % 100
-		l1, l2 := digits(g.lo)
-		x1, x2 := digits(g.secret)
-		h1, h2 := digits(g.hi)
+		n := []int{g.lo, g.secret, g.hi}
+		sort.Ints(n)
+		a1, a2 := digits(n[0])
+		b1, b2 := digits(n[1])
+		c1, c2 := digits(n[2])
 		s1, s2 := digits(g.score)
-		m.put(0, l1, l2, blank, x1, x2, blank, h1, h2, blank, s1, s2)
+		m.put(0, a1, a2, blank, b1, b2, blank, c1, c2, blank, s1, s2)
 		m.play(SoundChirp, 300*time.Millisecond)
 	} else {
 		g.pause = 1500 * time.Millisecond

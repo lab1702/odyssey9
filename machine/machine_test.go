@@ -100,13 +100,50 @@ func TestAssembleRoundTrip(t *testing.T) {
 			t.Errorf("%s -> % X -> %s (%d)", src, code, text, n)
 		}
 	}
-	for _, bad := range []string{"LDV.B", "XYZ", "OUT.10", "GTO.123"} {
+	for _, bad := range []string{"LDV.B", "XYZ", "OUT.10", "GTO.123", "GTO.A5", "BNE.4.2F", "GTS.FF"} {
 		if _, err := Assemble(bad); err == nil {
 			t.Errorf("%s assembled without error", bad)
 		}
 	}
 	if code, _ := Assemble("BVNE.4.24"); !bytes.Equal(code, []byte{0x24, 0x24}) {
 		t.Errorf("BVNE alias: % X", code)
+	}
+	if code, err := Assemble("LDV.9.2A"); err != nil || !bytes.Equal(code, []byte{0x69, 0x2A}) {
+		t.Errorf("LDV with a hex value: % X, %v", code, err)
+	}
+}
+
+// Every assembler statement printed in the manual's listings must assemble
+// to the hex code printed beside it.
+func TestSampleMnemonics(t *testing.T) {
+	n := 0
+	for _, s := range Samples {
+		for _, line := range strings.Split(s.Listing, "\n") {
+			fields := strings.Fields(line)
+			var code []byte
+			i := 1
+			for ; i < len(fields) && len(fields[i]) == 2; i++ {
+				var b byte
+				if _, err := fmt.Sscanf(fields[i], "%02X", &b); err != nil {
+					break
+				}
+				code = append(code, b)
+			}
+			if i >= len(fields) {
+				continue
+			}
+			if _, ok := opByMnemonic[strings.Split(fields[i], ".")[0]]; !ok {
+				continue // data and remarks
+			}
+			got, err := Assemble(fields[i])
+			if err != nil || !bytes.Equal(got, code) {
+				t.Errorf("%s: %q assembles to % X, %v; listing has % X", s.Name, fields[i], got, err, code)
+			}
+			n++
+		}
+	}
+	if n < 300 {
+		t.Errorf("only %d statements checked", n)
 	}
 }
 
@@ -411,6 +448,12 @@ func TestBuiltInGames(t *testing.T) {
 	m.Press(KeyYes)
 	if got := screenText(m); got != "03 05 07 01" {
 		t.Errorf("between got %q", got)
+	}
+	// A right NO shows the secret in its place outside the sheets.
+	b.lo, b.hi, b.secret, b.waiting = 3, 7, 50, true
+	m.Press(KeyNo)
+	if got := screenText(m); got != "03 07 50 02" {
+		t.Errorf("between NO got %q", got)
 	}
 }
 
