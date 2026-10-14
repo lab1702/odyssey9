@@ -59,7 +59,7 @@ func parseScript(s string) ([]machine.Key, error) {
 	return keys, nil
 }
 
-// runScript feeds one scripted key every few frames.
+// runScript types one scripted key every few frames.
 func (g *game) runScript() {
 	if len(g.script) > 0 && g.frame%4 == 0 {
 		switch k := g.script[0]; k {
@@ -71,7 +71,7 @@ func (g *game) runScript() {
 			g.save()
 		case machine.KeyNone:
 		default:
-			g.press(k)
+			g.typeKey(k)
 		}
 		g.script = g.script[1:]
 		g.shotWait = shotDelay

@@ -9,7 +9,7 @@ import (
 )
 
 func (g *game) drawPanel(c canvas, title string, w, h float32) (float32, float32) {
-	c.rect(0, 0, g.logicalW(), baseH, rgba(0x000000, 0xB0))
+	c.rect(0, 0, g.width, baseH, rgba(0x000000, 0xB0))
 	x := (baseW - w) / 2
 	y := (baseH - h) / 2
 	c.rrect(x, y, w, h, 12, rgb(0xF4F1EA))

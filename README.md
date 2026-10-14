@@ -28,7 +28,7 @@ files:
 
 ## Building
 
-You need Go 1.22 or newer.
+You need Go 1.27 or newer.
 
 ```sh
 go build -o odyssey9 .        # odyssey9.exe on Windows
@@ -72,7 +72,8 @@ A `-script` is typed one key at a time. Letters, digits and the symbols in
 the PC keyboard table stand for themselves. `{RESET}`, `{ENTER}`,
 `{CLEAR}`, `{YES}`, `{NO}` and `{SPACE}` press those keys. `{WAIT}`
 pauses, and `{HELP}`, `{PROGRAMS}` and `{SAVE}` work like the emulator's
-buttons. For example:
+buttons. While a panel is open, keys go to it, so `{PROGRAMS}C` loads the
+Message program. For example:
 
 ```sh
 ./odyssey9 -script "{RESET}PMI6B{ENTER}00{ENTER}" -screenshot out.png
@@ -129,6 +130,7 @@ There is a row of buttons under the TV, and each one also has a function key:
   * a SAVE that would replace a different program in the file
   * a LOAD, dropped file or PROGRAMS choice that would replace a program
     you haven't saved
+  * closing the window while you have a program you haven't saved
 * **MONITOR (F6)** opens a side panel showing the registers, the accumulator,
   the program counter and a disassembly of program memory.
 * **F7** colours the characters the way the manual's symbol chart does.
@@ -166,7 +168,8 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
   `INC` and `DEC` work in decimal. That is why `9+9` unpacks to the digits
   1 and 8, and why Creepy Crawler II's `13 + digit` lands on steps 13–22.
   The assembler rejects a branch target that isn't a step number, such as
-  `GTO.A5`. `LDV` still takes any hex value.
+  `GTO.A5`. If one gets in as hex, the monitor and listings show where it
+  really goes: `12 A5` is `GTO.A5 (=05)`. `LDV` still takes any hex value.
 * **`SUB.R`** works out *register − accumulator*. `DEC` takes 00 down to 99.
   `BDB` branches when the accumulator's high digit is 9, and `BDC` when it
   is not 0.
@@ -177,12 +180,13 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
   advances and wraps from 0A back to 00.
 * **`INP`/`INA`** show `?` and wait for a key, which beeps. The value stored
   is the key code from the manual's Key Codes table (`YES` = 2C, `NO` = 2D,
-  `CLEAR` = 2E, `ENTER` = 2F). Keys pressed while a program isn't waiting are
-  ignored.
+  `CLEAR` = 2E, `ENTER` = 2F). Keys typed while a program isn't waiting
+  are kept for its next `INP`/`INA`, up to 16 of them, and are dropped when
+  it stops. After RESET at a `?`, `C` waits for the key again.
 * **`SIG`** buzzes for one second, and the program pauses while it sounds.
 * **`HLT` (FF)** stops with **HALT** shown and puts you in Command mode. Then
   `D` `P` shows the step that holds the FF, and `C` continues from the
-  following step.
+  following step, even after a visit to Program mode or a game.
 * Undefined opcodes act as NOP. The manual's rule about adding a NOP after
   three outputs in a row was a hardware timing limit, and the emulator
   doesn't need it.

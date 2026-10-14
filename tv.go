@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"strings"
 
 	"github.com/hajimehoshi/ebiten/v2"
 
@@ -91,8 +92,10 @@ func (g *game) drawTV(c canvas) {
 			}
 			c.glyph(code, sx+float32(i)*spitch, sy, spx, spy, rgb(0xA9B8E8))
 		}
-		// blinking cursor while typing in Input mode
-		if g.m.Mode() == machine.ModeInput && g.frame/20%2 == 0 && len(codes) < machine.StatusWidth {
+		// blinking cursor at the end of the line being typed in Input mode
+		// (not after a note such as ERROR)
+		typing := g.m.Mode() == machine.ModeInput && strings.HasPrefix(status, "STEP ")
+		if typing && g.frame/20%2 == 0 && len(codes) < machine.StatusWidth {
 			c.glyph(0x2F, sx+float32(len(codes))*spitch, sy, spx, spy, rgba(0xE8ECFF, 0xA0))
 		}
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -25,6 +26,8 @@ const (
 	toastTime    = 4 * time.Second // how long a message stays up
 	confirmTime  = 4 * time.Second // how soon an action must be repeated to confirm it
 	buttonY      = 420             // top of the row of buttons under the TV
+	maxQueued    = 16              // typed keys that can wait for a running program
+	resizeWait   = 15              // ticks to wait for the window to resize (see toggleMonitor)
 )
 
 // panel is the panel drawn over the window, if any.
@@ -60,8 +63,12 @@ type game struct {
 	file     string
 	scale    float32 // render pixels per logical unit
 	monitor  bool
-	colors   bool  // colour characters like the manual's symbol chart
-	overlay  panel // drawn over the window
+	width    float32 // logical width in use: lags logicalW() while the window resizes
+	outsideW float64 // window width at the last Layout
+	resizeOf float64 // window width when MONITOR asked for a new size
+	resizeIn int     // ticks left to wait for that new size
+	colors   bool    // colour characters like the manual's symbol chart
+	overlay  panel   // drawn over the window
 	toast    string
 	toastFor time.Duration
 	clean    [machine.Steps]byte // the program as last saved or loaded
@@ -69,6 +76,8 @@ type game struct {
 	pendFor  time.Duration
 	keyLit   map[machine.Key]int // frames left to show a key as pressed
 	mouseKey machine.Key
+	keys     []machine.Key // typed keys on their way to the console, oldest first
+	held     int           // how many of them were left waiting for a program
 	buttons  []button
 	power    bool
 	last     time.Time
@@ -83,7 +92,7 @@ type game struct {
 }
 
 func newGame(m *machine.Machine, file string, sound bool) *game {
-	g := &game{m: m, file: file, keyLit: map[machine.Key]int{}, scale: 1, power: true}
+	g := &game{m: m, file: file, keyLit: map[machine.Key]int{}, scale: 1, width: baseW, power: true}
 	g.clean = m.Mem
 	g.snd = newAudio(sound)
 	x := float32(20)
@@ -127,7 +136,13 @@ func (g *game) LayoutF(outsideW, outsideH float64) (float64, float64) {
 	if mon := ebiten.Monitor(); mon != nil {
 		dsf = mon.DeviceScaleFactor()
 	}
-	lw := float64(g.logicalW())
+	// After MONITOR, keep the old width until the window has changed size
+	// (or stopped waiting for it), so the picture doesn't shrink meanwhile.
+	if g.width != g.logicalW() && (g.resizeIn <= 0 || outsideW != g.resizeOf) {
+		g.width = g.logicalW()
+	}
+	g.outsideW = outsideW
+	lw := float64(g.width)
 	s := math.Min(outsideW/lw, outsideH/baseH) * dsf
 	if s <= 0 {
 		s = 1
@@ -158,12 +173,72 @@ func (g *game) confirm(action, prompt string) bool {
 	return false
 }
 
+// press queues a key for the console. deliverKeys passes the queued keys
+// on in order.
 func (g *game) press(k machine.Key) {
 	g.keyLit[k] = keyLitFrames
-	if !g.power {
-		return
+	if g.power && len(g.keys) < maxQueued {
+		g.keys = append(g.keys, k)
+	}
+}
+
+// deliverKeys passes queued keys to the console. A running program only
+// reads a key at INP or INA, so it gets them one at a time, as it reaches
+// each one, and the rest wait. RESET doesn't wait: it stops the program,
+// and the keys typed before it are dropped.
+func (g *game) deliverKeys() {
+	for len(g.keys) > 0 {
+		k := g.keys[0]
+		if g.m.Mode() == machine.ModeExecute && !g.m.WaitingForKey() && k != keyErase {
+			i := slices.Index(g.keys, machine.KeyReset)
+			if i < 0 {
+				return
+			}
+			k, g.keys = machine.KeyReset, g.keys[i:]
+		}
+		g.keys = g.keys[1:]
+		g.deliver(k)
+	}
+}
+
+// deliver passes one key to the console.
+func (g *game) deliver(k machine.Key) {
+	switch k {
+	case keyBackspace, keyErase:
+		if g.m.Mode() == machine.ModeInput {
+			g.m.Backspace()
+			return
+		}
+		if k == keyErase {
+			return // only erasing repeats, not CLEAR
+		}
+		k = machine.KeyClear
+		g.keyLit[k] = keyLitFrames
 	}
 	g.m.Press(k)
+}
+
+// runConsole passes the queued keys to the console and runs it for dt.
+func (g *game) runConsole(dt time.Duration) {
+	if !g.power {
+		g.snd.set(machine.SoundNone)
+		return
+	}
+	// Keys left waiting for a program are dropped once it has stopped, or
+	// been replaced by a LOAD.
+	if g.m.Mode() != machine.ModeExecute {
+		g.keys = g.keys[min(g.held, len(g.keys)):]
+	}
+	g.deliverKeys()
+	g.held = len(g.keys)
+	g.m.Update(dt)
+	g.snd.set(g.m.CurrentSound())
+}
+
+// closeWindow reports whether the window may close: when it would lose an
+// unsaved program, only if the user closes it again.
+func (g *game) closeWindow() bool {
+	return !g.unsaved() || g.confirm("close", "Close again to quit and lose your unsaved program")
 }
 
 func (g *game) Update() error {
@@ -178,6 +253,9 @@ func (g *game) Update() error {
 		if g.quitErr != nil {
 			return g.quitErr
 		}
+		return errQuit
+	}
+	if ebiten.IsWindowBeingClosed() && g.closeWindow() {
 		return errQuit
 	}
 	g.runScript()
@@ -195,18 +273,15 @@ func (g *game) Update() error {
 	if g.pendFor > 0 {
 		g.pendFor -= dt
 	}
+	if g.resizeIn > 0 {
+		g.resizeIn--
+	}
 
 	g.handleShortcuts()
 	g.handleMouse()
 	g.handleDrops()
 	g.handleKeys()
-
-	if g.power {
-		g.m.Update(dt)
-		g.snd.set(g.m.CurrentSound())
-	} else {
-		g.snd.set(machine.SoundNone)
-	}
+	g.runConsole(dt)
 	return nil
 }
 
@@ -220,9 +295,14 @@ func (g *game) toggleOverlay(p panel) {
 
 func (g *game) toggleMonitor() {
 	ww, wh := ebiten.WindowSize()
-	old := g.logicalW()
 	g.monitor = !g.monitor
-	ebiten.SetWindowSize(int(float32(ww)*g.logicalW()/old), wh)
+	ebiten.SetWindowSize(int(float32(ww)*g.logicalW()/g.width), wh)
+	// Layout switches to the new width when the window changes size. A
+	// maximized or fullscreen window keeps its size, so it switches now.
+	g.resizeOf, g.resizeIn = g.outsideW, resizeWait
+	if ebiten.IsWindowMaximized() || ebiten.IsFullscreen() {
+		g.resizeIn = 0
+	}
 }
 
 func (g *game) togglePower() {
@@ -232,4 +312,5 @@ func (g *game) togglePower() {
 	}
 	g.power = !g.power
 	g.m.PowerOn() // switching off erases the program, as on the real console
+	g.keys = g.keys[:0]
 }

@@ -20,6 +20,8 @@ type tone struct {
 	sound atomic.Int32
 	cur   machine.Sound // the waveform being generated
 	t     float64       // seconds since start
+	start float64       // value of t when cur began
+	phase float64       // square wave position in its cycle, 0 to 1
 	vol   float64       // smoothed volume to avoid clicks
 	lfsr  uint32
 	noise float64
@@ -40,8 +42,13 @@ func (s *tone) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func square(t, f float64) float64 {
-	if math.Mod(t*f, 1) < 0.5 {
+// square advances the square wave by one sample at frequency f and returns
+// its value. Keeping the phase, rather than deriving it from t, means a
+// change of frequency never makes the wave jump.
+func (s *tone) square(f float64) float64 {
+	s.phase += f / sampleRate
+	s.phase -= math.Floor(s.phase)
+	if s.phase < 0.5 {
 		return 1
 	}
 	return -1
@@ -58,7 +65,7 @@ func (s *tone) sample() float64 {
 		if s.vol > 0.001 {
 			fading = true
 		} else {
-			s.cur = next
+			s.cur, s.start = next, s.t
 		}
 	}
 	v, target := s.wave()
@@ -73,7 +80,7 @@ func (s *tone) sample() float64 {
 func (s *tone) wave() (v, target float64) {
 	switch s.cur {
 	case machine.SoundBeep:
-		return square(s.t, 988), 0.22
+		return s.square(988), 0.22
 	case machine.SoundBuzz:
 		// The Odyssey2 buzz: a low square wave roughened by a noise shift
 		// register.
@@ -86,16 +93,17 @@ func (s *tone) wave() (v, target float64) {
 			s.lfsr = s.lfsr>>1 | bit<<15
 			s.noise = float64(bit)*2 - 1
 		}
-		return 0.6*square(s.t, 98) + 0.4*s.noise, 0.25
+		return 0.6*s.square(98) + 0.4*s.noise, 0.25
 	case machine.SoundError:
-		return square(s.t, 165), 0.22
+		return s.square(165), 0.22
 	case machine.SoundChirp:
-		return square(s.t, 1320+220*math.Sin(s.t*40)), 0.18
+		return s.square(1320 + 220*math.Sin(s.t*40)), 0.18
 	case machine.SoundBeeps:
-		if math.Mod(s.t*6, 1) < 0.55 {
+		// Six beeps a second, the first starting with the sound.
+		if math.Mod((s.t-s.start)*6, 1) < 0.55 {
 			target = 0.22
 		}
-		return square(s.t, 1175), target
+		return s.square(1175), target
 	}
 	return 0, 0
 }

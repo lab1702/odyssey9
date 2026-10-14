@@ -4,7 +4,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,11 +41,23 @@ func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
 }
 
 func (g *game) save() {
-	// Saving over a file that holds a different program needs confirming.
-	if old, err := os.ReadFile(g.file); err == nil {
+	// Saving over a file that holds a different program, or one that can't
+	// be read, needs confirming.
+	old, err := os.ReadFile(g.file)
+	switch {
+	case err == nil:
 		p, err := machine.ParseProgram(bytes.NewReader(old))
-		if (err != nil || *p != g.m.Mem) &&
-			!g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
+		if err == nil && *p == g.m.Mem {
+			// Rewriting the file would only lose the remarks written in it.
+			g.clean = g.m.Mem
+			g.showToast("Already saved in " + g.file)
+			return
+		}
+		if !g.confirm("save", "Press SAVE again to replace the program in "+g.file) {
+			return
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		if !g.confirm("save", "Cannot read "+g.file+" — press SAVE again to replace it") {
 			return
 		}
 	}
@@ -58,18 +72,30 @@ func (g *game) save() {
 }
 
 // writeFileAtomic writes data to a temporary file next to name and then
-// renames it, so a crash part-way through never leaves name truncated.
+// renames it, so a crash part-way through never leaves name truncated. If
+// name is a symlink, the file it points to is replaced, and an existing
+// file keeps its permissions.
 func writeFileAtomic(name string, data []byte) error {
+	if target, err := filepath.EvalSymlinks(name); err == nil {
+		name = target
+	}
+	mode := fs.FileMode(0o644)
+	if fi, err := os.Stat(name); err == nil {
+		mode = fi.Mode().Perm()
+	}
 	f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".*.tmp")
 	if err != nil {
 		return err
 	}
 	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err == nil {
-		err = os.Chmod(f.Name(), 0o644)
+		err = os.Chmod(f.Name(), mode)
 	}
 	if err == nil {
 		err = os.Rename(f.Name(), name)

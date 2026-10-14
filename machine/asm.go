@@ -114,7 +114,7 @@ var opByCode = func() (m [256]opInfo) {
 		case formNone, formNN:
 			m[o.op] = o
 		case formR, formRNN:
-			for r := byte(0); r < 16; r++ {
+			for r := range byte(16) {
 				m[o.op|r] = o
 			}
 		}
@@ -147,13 +147,19 @@ func Disassemble(mem *[Steps]byte, step int) (string, int) {
 	nn := mem[(step+1)%Steps]
 	r := op & 0x0F
 	n := min(o.size(), Steps-step)
+	// A branch target that isn't a step number (the assembler rejects
+	// GTO.A5) still jumps somewhere: show where, as "GTO.A5 (=05)".
+	target := ""
+	if o.op != opLDV && (nn>>4 > 9 || nn&0x0F > 9) {
+		target = fmt.Sprintf(" (=%02d)", bcdToStep(nn))
+	}
 	switch o.form {
 	case formR:
 		return fmt.Sprintf("%s.%X", o.mnemonic, r), n
 	case formNN:
-		return fmt.Sprintf("%s.%02X", o.mnemonic, nn), n
+		return fmt.Sprintf("%s.%02X%s", o.mnemonic, nn, target), n
 	case formRNN:
-		return fmt.Sprintf("%s.%X.%02X", o.mnemonic, r, nn), n
+		return fmt.Sprintf("%s.%X.%02X%s", o.mnemonic, r, nn, target), n
 	}
 	return o.mnemonic, n
 }
@@ -186,11 +192,11 @@ func Assemble(src string) ([]byte, error) {
 	}
 	val := func(s string) (byte, error) {
 		if len(s) < 1 || len(s) > 2 {
-			return 0, fmt.Errorf("value must be two hex digits, got %q", s)
+			return 0, fmt.Errorf("value must be one or two hex digits, got %q", s)
 		}
 		v, err := strconv.ParseUint(s, 16, 8)
 		if err != nil {
-			return 0, fmt.Errorf("value must be two hex digits, got %q", s)
+			return 0, fmt.Errorf("value must be one or two hex digits, got %q", s)
 		}
 		return byte(v), nil
 	}

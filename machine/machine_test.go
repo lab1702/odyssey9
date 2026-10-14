@@ -39,7 +39,7 @@ func screenText(m *Machine) string {
 // runUntilInput executes until the program waits for a key.
 func runUntilInput(t *testing.T, m *Machine) {
 	t.Helper()
-	for i := 0; i < 200000; i++ {
+	for range 200000 {
 		if m.WaitingForKey() || m.mode != ModeExecute {
 			return
 		}
@@ -135,12 +135,39 @@ func TestInstructionAtStep99(t *testing.T) {
 	}
 }
 
+// A branch target byte that isn't a step number is shown with the step it
+// really goes to, and the listing still loads back byte for byte.
+func TestDisassembleBadTarget(t *testing.T) {
+	var mem [Steps]byte
+	copy(mem[:], []byte{opGTO, 0xA5, opBEQ | 2, 0x1A, opLDV | 9, 0x2A})
+	for _, c := range []struct {
+		step int
+		want string
+	}{{0, "GTO.A5 (=05)"}, {2, "BEQ.2.1A (=20)"}, {4, "LDV.9.2A"}} {
+		if text, _ := Disassemble(&mem, c.step); text != c.want {
+			t.Errorf("step %02d: %q, want %q", c.step, text, c.want)
+		}
+	}
+	var buf bytes.Buffer
+	FormatProgram(&buf, "t", &mem)
+	q, err := ParseProgram(&buf)
+	if err != nil || *q != mem {
+		t.Errorf("round trip: %v\n%s", err, buf.String())
+	}
+	m := New()
+	m.LoadProgram(&mem)
+	m.Step()
+	if m.PC != 5 {
+		t.Errorf("GTO.A5 went to %02d", m.PC)
+	}
+}
+
 // Every assembler statement printed in the manual's listings must assemble
 // to the hex code printed beside it.
 func TestSampleMnemonics(t *testing.T) {
 	n := 0
 	for _, s := range Samples {
-		for _, line := range strings.Split(s.Listing, "\n") {
+		for line := range strings.SplitSeq(s.Listing, "\n") {
 			fields := strings.Fields(line)
 			var code []byte
 			i := 1
@@ -271,22 +298,42 @@ func TestFlashCardProgram(t *testing.T) {
 	if strings.Contains(screenText(m), "NO") {
 		t.Errorf("correct answer rejected: %q", screenText(m))
 	}
+	want := fmt.Sprintf("%d+%d=       ", m.R[0], m.R[1])
+	if got := screenText(m); got != want || m.Mode() != ModeExecute || !m.WaitingForKey() {
+		t.Errorf("after a right answer: screen %q (want %q), mode %v", got, want, m.Mode())
+	}
+	// A wrong answer gets a NO.
+	sum = m.R[0] + m.R[1]
+	m.Press(Key(int(Key0) + int(sum/10)))
+	runUntilInput(t, m)
+	m.Press(Key(int(Key0) + int(sum%10+1)%10))
+	runUntilInput(t, m)
+	if !strings.Contains(screenText(m), "NO") {
+		t.Errorf("wrong answer accepted: %q", screenText(m))
+	}
 }
 
 func TestCreepyCrawlerII(t *testing.T) {
 	m := New()
 	m.LoadProgram(Samples[1].Program())
 	m.Press(KeyE)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		m.blockLeft = 0
 		m.Step()
 	}
 	symbols := map[byte]bool{0x32: true, 0x33: true, 0x3A: true, 0x34: true, 0x35: true,
 		0x37: true, 0x3D: true, 0x3E: true, 0x36: true, 0x3C: true, blank: true}
+	shown := 0
 	for _, c := range m.Screen {
 		if !symbols[c] {
 			t.Fatalf("unexpected symbol %02X on screen", c)
 		}
+		if c != blank {
+			shown++
+		}
+	}
+	if shown == 0 {
+		t.Errorf("screen is blank")
 	}
 }
 
@@ -344,6 +391,112 @@ func TestHaltDisplayContinue(t *testing.T) {
 	m.Update(time.Second)
 	if m.R[1] != 0x07 || m.PC != 5 {
 		t.Errorf("continue: R1=%02X PC=%d", m.R[1], m.PC)
+	}
+}
+
+// C continues after the HLT even when Program mode or a game was visited
+// in between.
+func TestHaltContinueAfterDetour(t *testing.T) {
+	for name, detour := range map[string][]Key{
+		"program": {KeyP, KeyM, KeyR, KeyClear, KeyClear},
+		"game":    {Key1, KeyReset},
+	} {
+		m := New()
+		m.LoadProgram(&[Steps]byte{0x03, 0xFF, 0x03, 0xFF}) // INC, HLT, INC, HLT
+		m.Press(KeyE)
+		m.Update(time.Second)
+		if m.PC != 1 || m.Status() != "HALT" {
+			t.Fatalf("%s: first halt PC=%02d status %q", name, m.PC, m.Status())
+		}
+		for _, k := range detour {
+			m.Press(k)
+		}
+		if m.Mode() != ModeCommand || m.Status() != "COMMAND" {
+			t.Errorf("%s: after detour mode %v status %q", name, m.Mode(), m.Status())
+		}
+		m.Press(KeyC)
+		m.Update(time.Second)
+		if m.PC != 3 || m.A != 0x02 || m.Status() != "HALT" {
+			t.Errorf("%s: continue PC=%02d A=%02X status %q", name, m.PC, m.A, m.Status())
+		}
+	}
+}
+
+// RESET while the program waits at INP/INA, then C, waits for the key
+// again instead of skipping the input.
+func TestResetDuringInputContinue(t *testing.T) {
+	var prog [Steps]byte
+	prog[0], prog[1], prog[99] = opGTO, 0x99, opINP // GTO.99; INP.0 at step 99
+	m := New()
+	m.LoadProgram(&prog)
+	m.Press(KeyE)
+	m.Update(time.Second)
+	if !m.WaitingForKey() {
+		t.Fatalf("not waiting: PC=%02d mode %v", m.PC, m.Mode())
+	}
+	m.Press(KeyReset)
+	m.Press(KeyD)
+	m.Press(KeyP)
+	if got := m.Status(); got != "PROG CNTR  99" {
+		t.Errorf("PC display %q", got)
+	}
+	m.Press(KeyClear)
+	m.Press(KeyC)
+	m.Update(time.Second)
+	if !m.WaitingForKey() {
+		t.Fatalf("C skipped the input: PC=%02d mode %v", m.PC, m.Mode())
+	}
+	m.Press(Key5)
+	if m.R[0] != 5 {
+		t.Errorf("R0=%02X after pressing 5", m.R[0])
+	}
+}
+
+// A two-byte statement entered at step 99 is refused rather than putting
+// its operand in step 00; a one-byte statement still fits.
+func TestAssemblerEntryAtStep99(t *testing.T) {
+	m := New()
+	for _, k := range []Key{KeyReset, KeyP, KeyA, KeyR, KeyD, KeyClear, KeyA, KeyI} {
+		m.Press(k)
+	}
+	if m.Mode() != ModeInput || m.EditStep() != 99 {
+		t.Fatalf("mode %v step %02d", m.Mode(), m.EditStep())
+	}
+	typeText := func(s string) {
+		for _, r := range s {
+			if r == '.' {
+				m.Press(KeyPeriod)
+			} else {
+				m.Press(KeyForLetter(r))
+			}
+		}
+		m.Press(KeyEnter)
+	}
+	typeText("GTO.15")
+	if m.Status() != "ERROR" || m.Mem[99] != 0 || m.Mem[0] != 0 || m.EditStep() != 99 {
+		t.Errorf("GTO at 99: status %q mem[99]=%02X mem[0]=%02X step %02d",
+			m.Status(), m.Mem[99], m.Mem[0], m.EditStep())
+	}
+	typeText("INC")
+	if m.Mem[99] != opINC || m.EditStep() != 0 {
+		t.Errorf("INC at 99: mem[99]=%02X step %02d", m.Mem[99], m.EditStep())
+	}
+}
+
+func TestRND(t *testing.T) {
+	m := New()
+	m.LoadProgram(&[Steps]byte{opRND})
+	seen := map[byte]bool{}
+	for range 1000 {
+		m.PC = 0
+		m.Step()
+		if m.A>>4 > 9 || m.A&0x0F > 9 {
+			t.Fatalf("RND gave %02X, not a decimal 00-99", m.A)
+		}
+		seen[m.A] = true
+	}
+	if len(seen) < 2 {
+		t.Errorf("RND gave only %d distinct values in 1000 draws", len(seen))
 	}
 }
 
@@ -439,7 +592,7 @@ func TestSpeedChangeDuringSig(t *testing.T) {
 	frame := time.Second / 60
 	m.Update(frame)
 	m.SetSpeed(SpeedSlow)
-	for i := 0; i < 66; i++ {
+	for range 66 {
 		m.Update(frame)
 	}
 	if m.A > 0x01 {

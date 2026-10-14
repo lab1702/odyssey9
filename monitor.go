@@ -31,7 +31,7 @@ func (g *game) drawMonitor(c canvas) {
 	y += 30
 	c.text(fmt.Sprintf("ACCUM %02X   PC %02d   SUBR %02d", m.A, m.PC, m.S), fontMono, 13, x0+20, y, ink, -1)
 	y += 26
-	for r := 0; r < 16; r++ {
+	for r := range 16 {
 		cx := x0 + 20 + float32(r%4)*68
 		cy := y + float32(r/4)*20
 		col := ink
@@ -63,13 +63,7 @@ func (g *game) drawMonitor(c canvas) {
 		}
 	}
 	const lines = 30
-	first := idx - lines/2
-	if first > len(starts)-lines {
-		first = len(starts) - lines
-	}
-	if first < 0 {
-		first = 0
-	}
+	first := max(min(idx-lines/2, len(starts)-lines), 0)
 	for i := first; i < first+lines && i < len(starts); i++ {
 		s := starts[i]
 		text, n := machine.Disassemble(&m.Mem, s)

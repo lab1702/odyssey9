@@ -107,7 +107,8 @@ type Machine struct {
 
 	// execution
 	waitReg   int  // register awaiting a key, waitAcc or notWaiting
-	halted    bool // stopped by HLT
+	halted    bool // stopped by HLT; C then continues after it
+	showHalt  bool // the Command mode shows HALT rather than COMMAND
 	budget    float64
 	blockLeft time.Duration // remaining time the program is paused for SIG
 
@@ -143,7 +144,7 @@ func (m *Machine) PowerOn() {
 	m.inBuf = nil
 	m.display = ""
 	m.waitReg = notWaiting
-	m.halted = false
+	m.halted, m.showHalt = false, false
 	m.blockLeft = 0
 	m.game = nil
 	m.note = ""
@@ -214,7 +215,7 @@ func (m *Machine) Status() string {
 	case ModeSelect:
 		return "SELECT GAME"
 	case ModeCommand:
-		if m.halted {
+		if m.showHalt {
 			return "HALT"
 		}
 		return "COMMAND"
@@ -314,6 +315,11 @@ func (m *Machine) Backspace() {
 func (m *Machine) reset() {
 	m.note = ""
 	m.game = nil
+	if m.WaitingForKey() {
+		// Back up to the INP/INA (one step) so that C waits for the key
+		// again, the way HLT leaves the program counter on the FF.
+		m.PC = (m.PC + Steps - 1) % Steps
+	}
 	m.waitReg = notWaiting
 	m.blockLeft = 0
 	m.sound, m.soundLeft = SoundNone, 0
@@ -329,13 +335,13 @@ func (m *Machine) pressCommand(k Key) {
 	case KeyE:
 		m.clearScreen()
 		m.PC = 0
-		m.halted = false
+		m.halted, m.showHalt = false, false
 		m.startRunning()
 	case KeyC:
 		if m.halted && m.Mem[m.PC] == 0xFF {
 			m.PC = (m.PC + 1) % Steps
 		}
-		m.halted = false
+		m.halted, m.showHalt = false, false
 		m.startRunning()
 	case KeyD:
 		m.mode = ModeDisplay
@@ -343,7 +349,7 @@ func (m *Machine) pressCommand(k Key) {
 	case KeyP:
 		m.mode = ModeProgram
 		m.editStep = 0
-		m.halted = false
+		m.showHalt = false
 	case KeyClear:
 	default:
 		if d := k.Digit(); d >= 1 && d <= 4 {
@@ -424,7 +430,9 @@ func (m *Machine) enterStatement() {
 	} else {
 		var err error
 		code, err = Assemble(string(m.inBuf))
-		if err != nil {
+		// A two-byte statement doesn't fit at step 99: its operand would
+		// silently land on step 00.
+		if err != nil || len(code) > Steps-m.editStep {
 			m.errorBeep()
 			m.setNote("ERROR")
 			m.inBuf = nil
@@ -604,7 +612,7 @@ func (m *Machine) Step() {
 		m.A = bcdAdd(m.A, m.R[r])
 	case opHLT:
 		m.PC = start
-		m.halted = true
+		m.halted, m.showHalt = true, true
 		m.mode = ModeCommand
 	}
 }

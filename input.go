@@ -5,7 +5,6 @@ package main
 import (
 	"io/fs"
 	"strings"
-	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -36,26 +35,31 @@ func (g *game) handleShortcuts() {
 
 // handleKeys passes typed keys to the console, or to the open panel.
 func (g *game) handleKeys() {
+	panel := g.overlay != noPanel
+	// A key held down repeats its character, which mustn't count as the
+	// second press that confirms a choice of program.
+	if panel && len(inpututil.AppendJustPressedKeys(nil)) == 0 {
+		return
+	}
+	for _, k := range pollKeyboard() {
+		if panel && g.overlay == noPanel {
+			break // the rest were typed at the panel that just closed
+		}
+		g.typeKey(k)
+	}
+}
+
+// typeKey handles a key typed on the host keyboard or by a script: it goes
+// to the open panel, if any, and otherwise to the console.
+func (g *game) typeKey(k machine.Key) {
 	switch {
 	case g.overlay == noPanel:
-		keys, bs, held := pollKeyboard()
-		for _, k := range keys {
-			g.press(k)
-		}
-		if bs && g.power {
-			if g.m.Mode() == machine.ModeInput {
-				g.m.Backspace()
-			} else if !held { // only erasing repeats, not CLEAR
-				g.press(machine.KeyClear)
-			}
-		}
-	case inpututil.IsKeyJustPressed(ebiten.KeyEscape):
+		g.press(k)
+	case k == machine.KeyReset: // Esc
 		g.overlay = noPanel
 	case g.overlay == programsPanel:
-		for _, r := range ebiten.AppendInputChars(nil) {
-			if i := strings.IndexRune(sampleKeys, unicode.ToUpper(r)); i >= 0 && i < len(machine.Samples) {
-				g.loadSample(i)
-			}
+		if i := strings.IndexRune(sampleKeys, k.Rune()); i >= 0 && i < len(machine.Samples) {
+			g.loadSample(i)
 		}
 	}
 }

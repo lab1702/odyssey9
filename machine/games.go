@@ -15,7 +15,7 @@ type game interface {
 func (m *Machine) startGame(n int) {
 	m.clearScreen()
 	m.mode = ModeGame
-	m.halted = false
+	m.showHalt = false
 	switch n {
 	case 1:
 		m.game = &creepyCrawler{}

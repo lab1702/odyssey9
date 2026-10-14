@@ -58,6 +58,7 @@ func main() {
 	g.script, g.shotPath, g.shotWait = keys, *shot, shotDelay
 	ebiten.SetWindowTitle("Odyssey² Computer Intro! (Videopac 9)")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	ebiten.SetWindowClosingHandled(true) // so closing can ask before losing work
 	w, h := g.windowSize()
 	ebiten.SetWindowSize(w, h)
 	ebiten.SetTPS(60)

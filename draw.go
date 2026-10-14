@@ -102,7 +102,7 @@ func initGlyphs() {
 	for code := range glyphImages {
 		pix := make([]byte, 4*machine.GlyphWidth*machine.GlyphHeight)
 		for y, bits := range machine.Glyph(byte(code)) {
-			for x := 0; x < machine.GlyphWidth; x++ {
+			for x := range machine.GlyphWidth {
 				if bits&(0x80>>x) != 0 {
 					copy(pix[4*(y*machine.GlyphWidth+x):], []byte{0xFF, 0xFF, 0xFF, 0xFF})
 				}

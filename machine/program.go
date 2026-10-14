@@ -6,43 +6,48 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ParseProgram reads a program listing. Each line starts with a decimal
 // step number followed by one or more two-digit hex bytes separated by
 // single spaces. The bytes end at the first word that isn't one or at a gap
 // of two or more spaces or a tab; anything after that (an assembler
-// mnemonic, a remark) is ignored, as is any text after ';' or '#'. This
-// accepts the listing format used in the manual:
+// mnemonic, a remark) is ignored, as is any text after ';' or '#'. Lines
+// may end in LF, CR LF or CR, and any other Unicode space counts as a
+// space. This accepts the listing format used in the manual:
 //
 //	04   6B 00  LDV.B.00   Set output position to 00
 func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 	var mem [Steps]byte
-	sc := bufio.NewScanner(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	text := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(string(data))
 	lineNo, count := 0, 0
-	for sc.Scan() {
+	for line := range strings.SplitSeq(text, "\n") {
 		lineNo++
-		line := sc.Text()
 		if lineNo == 1 {
 			line = strings.TrimPrefix(line, "\uFEFF") // UTF-8 byte order mark
 		}
 		if i := strings.IndexAny(line, ";#"); i >= 0 {
 			line = line[:i]
 		}
-		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(strings.Map(plainSpace, line))
 		if line == "" {
 			continue
 		}
 		first, rest, _ := strings.Cut(strings.ReplaceAll(line, "\t", "  "), " ")
 		step, err := strconv.Atoi(first)
-		if err != nil || step < 0 || step >= Steps || len(first) > 2 {
+		if err != nil || len(first) > 2 || strings.Trim(first, "0123456789") != "" {
 			return nil, fmt.Errorf("line %d: %q is not a step number 00-99", lineNo, first)
 		}
 		// A wider gap separates the bytes from a remark, so a remark that
 		// starts with a hex-like word ("BE QUIET") isn't read as code.
 		rest, _, _ = strings.Cut(strings.TrimLeft(rest, " "), "  ")
 		n := 0
-		for _, f := range strings.Split(rest, " ") {
+		for f := range strings.SplitSeq(rest, " ") {
 			if len(f) != 2 {
 				break
 			}
@@ -58,13 +63,19 @@ func ParseProgram(r io.Reader) (*[Steps]byte, error) {
 		}
 		count += n
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
 	if count == 0 {
 		return nil, fmt.Errorf("no program steps found")
 	}
 	return &mem, nil
+}
+
+// plainSpace turns any Unicode space other than a tab, such as a no-break
+// space pasted from a web page, into a plain space.
+func plainSpace(r rune) rune {
+	if r != '\t' && unicode.IsSpace(r) {
+		return ' '
+	}
+	return r
 }
 
 // FormatProgram writes program memory as a listing that ParseProgram can

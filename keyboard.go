@@ -157,28 +157,51 @@ func keyForRune(r rune) (machine.Key, bool) {
 	return k, ok
 }
 
+// Pseudo-keys for Backspace, which the console doesn't have. What they do
+// depends on the mode when they reach the console (see game.deliver).
+const (
+	keyBackspace machine.Key = -10 // erases in Input mode, otherwise CLEAR
+	keyErase     machine.Key = -11 // Backspace held down: only erases
+)
+
 // pollKeyboard returns the Odyssey2 keys pressed on the host keyboard
-// this frame. Backspace is reported separately because it is an emulator
-// editing aid rather than an Odyssey2 key; repeat says it is being held.
-func pollKeyboard() (keys []machine.Key, backspace, repeat bool) {
-	for _, r := range ebiten.AppendInputChars(nil) {
+// this tick.
+func pollKeyboard() []machine.Key {
+	return hostKeys(ebiten.AppendInputChars(nil), inpututil.AppendJustPressedKeys(nil),
+		inpututil.KeyPressDuration(ebiten.KeyBackspace))
+}
+
+// hostKeys turns one tick of host keyboard input into Odyssey2 keys: the
+// characters typed, the keys just pressed and how many ticks Backspace has
+// been held. Ebitengine doesn't say in what order characters and other keys
+// came within a tick, so they are put in the order that does least harm
+// when two land in the same tick. Backspace and Enter go first: if that is
+// wrong, the line on the screen shows it or the console beeps, where the
+// other order could silently store a wrong step. Delete and Esc go last, so
+// a character typed with them is lost rather than taken as a command.
+func hostKeys(chars []rune, pressed []ebiten.Key, backspace int) []machine.Key {
+	var keys, last []machine.Key
+	// Backspace repeats while held, like typed characters: after half a
+	// second, 15 times a second.
+	if backspace == 1 {
+		keys = append(keys, keyBackspace)
+	} else if backspace >= 30 && (backspace-30)%4 == 0 {
+		keys = append(keys, keyErase)
+	}
+	for _, p := range pressed {
+		switch p {
+		case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
+			keys = append(keys, machine.KeyEnter)
+		case ebiten.KeyDelete:
+			last = append(last, machine.KeyClear)
+		case ebiten.KeyEscape:
+			last = append(last, machine.KeyReset)
+		}
+	}
+	for _, r := range chars {
 		if k, ok := keyForRune(r); ok {
 			keys = append(keys, k)
 		}
 	}
-	for _, p := range inpututil.AppendJustPressedKeys(nil) {
-		switch p {
-		case ebiten.KeyEnter, ebiten.KeyNumpadEnter:
-			keys = append(keys, machine.KeyEnter)
-		case ebiten.KeyEscape:
-			keys = append(keys, machine.KeyReset)
-		case ebiten.KeyDelete:
-			keys = append(keys, machine.KeyClear)
-		}
-	}
-	// Backspace repeats while held, like typed characters: after half a
-	// second, 15 times a second.
-	d := inpututil.KeyPressDuration(ebiten.KeyBackspace)
-	backspace = d == 1 || d >= 30 && (d-30)%4 == 0
-	return keys, backspace, d > 1
+	return append(keys, last...)
 }

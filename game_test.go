@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hajimehoshi/ebiten/v2"
 
 	"odyssey9/machine"
 )
@@ -21,6 +24,93 @@ func typeStep(g *game, keys ...machine.Key) {
 		g.press(k)
 	}
 	g.press(machine.KeyEnter)
+	tick(g)
+}
+
+// tick runs the console for one tick, as Update does.
+func tick(g *game) {
+	g.runConsole(time.Second / 60)
+}
+
+func TestKeysTypedTogetherKeepASafeOrder(t *testing.T) {
+	g := testGame(t)
+	typeStep(g, machine.Key0, machine.Key8)
+	for _, k := range []machine.Key{machine.KeyReset, machine.KeyP, machine.KeyM, machine.KeyI, machine.Key6, machine.KeyB} {
+		g.press(k)
+	}
+	tick(g)
+	// ENTER and the next digit typed within one tick
+	for _, k := range hostKeys([]rune{'0'}, []ebiten.Key{ebiten.KeyEnter}, 0) {
+		g.press(k)
+	}
+	tick(g)
+	if g.m.Mem[0] != 0x6B {
+		t.Errorf("step 00 = %02X, want 6B", g.m.Mem[0])
+	}
+	if got := g.m.Status(); got != "STEP 01 0" {
+		t.Errorf("status %q, want %q", got, "STEP 01 0")
+	}
+}
+
+func TestRunningProgramGetsEveryKey(t *testing.T) {
+	g := testGame(t)
+	g.m.LoadProgram(&[machine.Steps]byte{0x70, 0x71, 0xFF}) // INP.0 INP.1 HLT
+	for _, k := range []machine.Key{machine.KeyE, machine.Key5, machine.Key6} {
+		g.press(k) // all in one tick
+	}
+	for range 10 {
+		tick(g)
+	}
+	if g.m.R[0] != machine.Key5.Code() || g.m.R[1] != machine.Key6.Code() {
+		t.Errorf("registers 0, 1 = %02X, %02X; want the codes of 5 and 6", g.m.R[0], g.m.R[1])
+	}
+	if g.m.Mode() != machine.ModeCommand {
+		t.Errorf("mode %v, want the program to have stopped", g.m.Mode())
+	}
+
+	// Keys wait for an INP, but RESET doesn't.
+	g.m.LoadProgram(&[machine.Steps]byte{0x12, 0x00}) // GTO.00
+	g.press(machine.KeyE)
+	tick(g)
+	for _, k := range []machine.Key{machine.Key5, machine.KeyReset, machine.KeyD} {
+		g.press(k)
+	}
+	tick(g)
+	if g.m.Mode() != machine.ModeDisplay || len(g.keys) != 0 {
+		t.Errorf("after 5 RESET D: mode %v, %d keys queued; want DISPLAY and none", g.m.Mode(), len(g.keys))
+	}
+}
+
+func TestScriptChoosesProgram(t *testing.T) {
+	g := testGame(t)
+	keys, err := parseScript("{PROGRAMS}C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.script = keys
+	for range 20 {
+		g.frame++
+		g.runScript()
+		tick(g)
+	}
+	want := machine.Samples[strings.IndexByte(sampleKeys, 'C')]
+	if g.m.Mem != *want.Program() || g.overlay != noPanel {
+		t.Errorf("{PROGRAMS}C didn't load %s and close the panel", want.Name)
+	}
+}
+
+func TestCloseAsksBeforeLosingWork(t *testing.T) {
+	g := testGame(t)
+	if !g.closeWindow() {
+		t.Fatal("closing with nothing unsaved needed confirming")
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	if g.closeWindow() {
+		t.Fatal("closing lost unsaved work without asking")
+	}
+	if !g.closeWindow() {
+		t.Fatal("second close didn't quit")
+	}
 }
 
 func TestSaveAsksBeforeReplacingAnotherProgram(t *testing.T) {
