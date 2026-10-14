@@ -2,3 +2,6 @@
 /odyssey9
 /odyssey9.exe
 /odyssey9-*
+
+# Manual scan (copyrighted, kept out of the repo)
+*.pdf

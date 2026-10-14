@@ -9,7 +9,8 @@ the manual. Click the keys or type on your own keyboard.
 
 The cartridge turns the console into a small teaching computer, and that
 computer is what this emulator implements. It is built from the manual
-(`computer-intro.txt` / the PDF) and needs no ROM files:
+(`computer-intro.txt`; the original scanned PDF is not included in the
+repository) and needs no ROM files:
 
 * 16 registers (0–F), an accumulator, a program counter and a subroutine
   return register
@@ -164,5 +165,5 @@ describes. For example, `9 ÷ 2` shows `04+R`, Message 2 shows
 ## License
 
 The emulator source code is released under the [MIT License](LICENSE).
-The Computer Intro! manual (`Computer Intro (USA).pdf`, `computer-intro.txt`)
+The Computer Intro! manual text (`computer-intro.txt`)
 is © 1979 Magnavox and is not covered by this license.
