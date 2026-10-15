@@ -2,6 +2,24 @@
 
 ![The emulator running the manual's Message program, with the monitor panel open](docs/screenshot.png)
 
+## The Odyssey² and Videopac 9
+
+The Magnavox Odyssey² was a home video game console released in North
+America in 1978. Magnavox was owned by Philips, which sold the same console
+in Europe as the Philips Videopac G7000. Unlike most consoles of its time it
+had a full alphanumeric membrane keyboard built in. Its games came on
+cartridges, which in Europe were numbered: Videopac 1, Videopac 2 and so on.
+
+**Computer Intro!** (Magnavox, 1979) used that keyboard to turn the console
+into a small programmable computer for learning machine code and assembly
+language. It came with a 104-page manual, *A Beginner's Guide to Computer
+Technology*. In Europe it was Videopac 9, sold by Philips as
+*Computer Programmer* and by Radiola as *Programation*. See its
+[entry on odyssey2.info](https://odyssey2.info/db/game/computer-intro-12)
+for more.
+
+## The emulator
+
 An emulator of the Magnavox Odyssey² with the **Computer Intro!** cartridge
 (Philips Videopac 9) inserted, written in Go with
 [Ebitengine](https://ebitengine.org) so it runs on Windows, macOS and Linux.
