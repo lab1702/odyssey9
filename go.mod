@@ -1,8 +1,6 @@
 module odyssey9
 
-go 1.27.0
-
-toolchain go1.27.2
+go 1.27
 
 require (
 	github.com/hajimehoshi/ebiten/v2 v2.8.8
