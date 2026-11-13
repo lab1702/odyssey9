@@ -136,11 +136,21 @@ func TestHexInputEditing(t *testing.T) {
 	if got := m.Status(); got != "STEP 00 2" {
 		t.Errorf("after Backspace: %q", got)
 	}
+	// One digit isn't entered. It says so, for when the sound is off, and
+	// keeps the digit to be completed.
 	m.Press(KeyEnter)
-	if m.Mem[0] != 0 || m.CurrentSound() != SoundError || m.Status() != "STEP 00 2" {
+	if m.Mem[0] != 0 || m.CurrentSound() != SoundError || m.Status() != "ERROR" {
 		t.Errorf("ENTER with one digit: step 00 = %02X, sound %v, status %q", m.Mem[0], m.CurrentSound(), m.Status())
 	}
+	m.Update(2 * time.Second)
+	if got := m.Status(); got != "STEP 00 2" {
+		t.Errorf("after the ERROR note: %q, want the digit kept", got)
+	}
+	m.Press(KeyEnter)
 	m.Backspace()
+	if got := m.Status(); got != "STEP 00 " {
+		t.Errorf("Backspace under the ERROR note: %q, want the line shown again", got)
+	}
 	m.Backspace() // nothing left to erase
 	press(m, KeyA, Key5, KeyEnter)
 	if m.Mem[0] != 0xA5 || m.Status() != "STEP 01 " {

@@ -4,19 +4,36 @@ package main
 
 import (
 	"fmt"
+	"slices"
+	"unicode"
 
 	"odyssey9/machine"
 )
 
-// listing returns instruction start steps, decoding from step 00.
-func listing(mem *[machine.Steps]byte) []int {
-	var starts []int
+// listLine is one line of the monitor's listing: an instruction, or one
+// step of data.
+type listLine struct {
+	step, n int    // the first step and how many steps
+	text    string // the instruction, or the letter the data shows
+}
+
+// listing returns the lines of program memory: the instructions the
+// program can reach (see machine.CodeSteps), and a line for each other
+// step, which holds data, with its letter if it is one's character code.
+func listing(mem *[machine.Steps]byte) []listLine {
+	var lines []listLine
+	code := machine.CodeSteps(mem)
 	for s := 0; s < machine.Steps; {
-		starts = append(starts, s)
-		_, n := machine.Disassemble(mem, s)
-		s += n
+		l := listLine{step: s, n: 1}
+		if code[s] {
+			l.text, l.n = machine.Disassemble(mem, s)
+		} else if r, ok := machine.CodeRune(mem[s]); ok && unicode.IsLetter(r) {
+			l.text = fmt.Sprintf("'%c'", r)
+		}
+		lines = append(lines, l)
+		s += l.n
 	}
-	return starts
+	return lines
 }
 
 func (g *game) drawMonitor(c canvas) {
@@ -59,24 +76,20 @@ func (g *game) drawMonitor(c canvas) {
 	}
 	c.text("PROGRAM  (> "+label+")", fontBold, 12, x0+20, y, dim, -1)
 	y += 20
-	starts := listing(&m.Mem)
+	list := listing(&m.Mem)
 	idx := 0
-	for i, s := range starts {
-		if s <= focus {
+	for i, l := range list {
+		if l.step <= focus {
 			idx = i
 		}
 	}
 	const lines = 30
-	first := max(min(idx-lines/2, len(starts)-lines), 0)
-	for i := first; i < first+lines && i < len(starts); i++ {
-		s := starts[i]
-		text, n := machine.Disassemble(&m.Mem, s)
-		hex := fmt.Sprintf("%02X", m.Mem[s])
-		if n == 2 {
-			hex += fmt.Sprintf(" %02X", m.Mem[s+1])
-		}
+	first := max(min(idx-lines/2, len(list)-lines), 0)
+	for i := first; i < first+lines && i < len(list); i++ {
+		l := list[i]
+		code := m.Mem[l.step : l.step+l.n]
 		col := dim
-		if m.Mem[s] != 0 || (n == 2 && m.Mem[s+1] != 0) {
+		if slices.ContainsFunc(code, func(b byte) bool { return b != 0 }) {
 			col = ink
 		}
 		mark := " "
@@ -85,7 +98,7 @@ func (g *game) drawMonitor(c canvas) {
 			col = hi
 			c.rect(x0+12, y-9, monitorW-24, 18, rgb(0x2A2E38))
 		}
-		c.text(fmt.Sprintf("%s %02d  %-5s  %s", mark, s, hex, text), fontMono, 13, x0+18, y, col, -1)
+		c.text(fmt.Sprintf("%s %02d  %-5s  %s", mark, l.step, machine.HexBytes(code), l.text), fontMono, 13, x0+18, y, col, -1)
 		y += 19
 	}
 }

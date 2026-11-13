@@ -45,26 +45,34 @@ func (g *game) replace(p *[machine.Steps]byte, action, prompt string) bool {
 
 func (g *game) save() {
 	old, err := readListing(openListing(g.file))
+	listing := false // the file holds a program listing
 	if err == nil {
-		if p, err := machine.ParseProgram(bytes.NewReader(old)); err == nil && *p == g.m.Mem {
+		p, perr := machine.ParseProgram(bytes.NewReader(old))
+		if perr == nil && *p == g.m.Mem {
 			// Rewriting the file would only lose the remarks written in it.
 			g.clean = g.m.Mem
 			g.showToast("Already saved in " + g.file)
 			return
 		}
+		listing = perr == nil
 	}
 	// A file that can't be written isn't replaced, so say so before asking.
 	if err := checkWritable(g.file); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		g.showToast("Save failed: " + err.Error())
 		return
 	}
-	// Saving over a file that holds a different program, or one that can't
-	// be read, needs confirming.
+	// Saving over a file that holds a different program, or something that
+	// isn't a program, or one that can't be read, needs confirming.
 	switch {
 	case err == nil:
 		prompt := "Press SAVE again to replace the program in " + g.file
-		if g.m.Mem == ([machine.Steps]byte{}) {
+		switch {
+		case !listing && len(bytes.TrimSpace(old)) > 0:
+			prompt = g.file + " is not a program listing — press SAVE again to replace it"
+		case g.m.Mem == ([machine.Steps]byte{}):
 			prompt = "No program to save: press SAVE again to empty " + g.file
+		case !listing:
+			prompt = "Press SAVE again to save in the empty file " + g.file
 		}
 		if !g.confirm("save", prompt) {
 			return
@@ -126,14 +134,7 @@ func writeFileAtomic(name string, data []byte) error {
 		os.Remove(f.Name())
 		return writeInPlace(name, data)
 	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if err := writeSyncClose(f, data); err != nil {
 		os.Remove(f.Name())
 		return err
 	}
@@ -149,6 +150,19 @@ func writeFileAtomic(name string, data []byte) error {
 	syncDir(filepath.Dir(name))
 	removeStale(filepath.Dir(name))
 	return nil
+}
+
+// writeSyncClose writes data to the newly made file f, has the system put
+// it on disk, and closes f. It returns the first error.
+func writeSyncClose(f *os.File, data []byte) error {
+	_, err := f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // rename is os.Rename, replaced in tests to make it fail.
@@ -199,14 +213,7 @@ func writeNewFile(name string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if err := writeSyncClose(f, data); err != nil {
 		// Don't leave part of a program to be loaded later. Through a
 		// symlink, the file to remove is the one it points to, made just
 		// now; the link stays.
@@ -380,14 +387,7 @@ func writeRecovery(dir string, data []byte) (string, error) {
 	}
 	name := f.Name()
 	recovering.Store(&name)
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
+	if err := writeSyncClose(f, data); err != nil {
 		os.Remove(name)
 		recovering.Store(nil)
 		return "", err

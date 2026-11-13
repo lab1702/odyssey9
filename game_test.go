@@ -1047,3 +1047,57 @@ func TestShorten(t *testing.T) {
 		t.Errorf("shorten with no room = %q, want %q", got, "…c")
 	}
 }
+
+// SAVE over a file that isn't a program listing says what it is about to
+// replace, and an empty file isn't called a program.
+func TestSaveOverOtherFile(t *testing.T) {
+	g := testGame(t)
+	const notes = "shopping: eggs\n"
+	if err := os.WriteFile(g.file, []byte(notes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	typeStep(g, machine.Key0, machine.Key8) // RND
+	g.save()
+	if !strings.Contains(g.toast, "not a program listing") || mustRead(t, g.file) != notes {
+		t.Fatalf("SAVE over a file of notes: toast %q, file %q", g.toast, mustRead(t, g.file))
+	}
+	g.save()
+	if p, err := machine.ParseProgram(strings.NewReader(mustRead(t, g.file))); err != nil || p[0] != 0x08 {
+		t.Fatalf("second SAVE didn't write the program: %v", err)
+	}
+
+	g = testGame(t)
+	if err := os.WriteFile(g.file, []byte(" \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	typeStep(g, machine.Key0, machine.Key8)
+	g.save()
+	if !strings.Contains(g.toast, "empty file") || strings.Contains(g.toast, "program in") {
+		t.Errorf("SAVE over an empty file: toast %q", g.toast)
+	}
+}
+
+// The monitor lists a program's data a step to a line, with its letters,
+// rather than as the instructions its bytes would be.
+func TestMonitorListsData(t *testing.T) {
+	i := slices.IndexFunc(machine.Samples, func(s machine.Sample) bool { return s.Name == "Message" })
+	lines := listing(machine.Samples[i].Program())
+	at := func(step int) listLine {
+		j := slices.IndexFunc(lines, func(l listLine) bool { return l.step == step })
+		if j < 0 {
+			t.Fatalf("no line for step %02d", step)
+		}
+		return lines[j]
+	}
+	for step, want := range map[int]listLine{
+		28: {28, 2, "GTO.24"},
+		30: {30, 1, "'H'"},
+		31: {31, 1, "'E'"}, // 12, which would be GTO
+		35: {35, 1, ""},    // the 00 that ends HELLO
+		91: {91, 1, ""},    // the table of where the messages are
+	} {
+		if got := at(step); got != want {
+			t.Errorf("step %02d: %+v, want %+v", step, got, want)
+		}
+	}
+}

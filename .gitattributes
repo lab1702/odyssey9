@@ -1,0 +1,4 @@
+# The example listings are compared byte for byte with the programs in
+# machine/samples.go (TestExamplesMatchSamples), so they keep LF line ends
+# on every system.
+examples/*.txt text eol=lf

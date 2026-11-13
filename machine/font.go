@@ -126,6 +126,22 @@ var codeLetters = map[byte]rune{
 	0x2C: 'Y', 0x2D: 'N',
 }
 
+// codeToASCII is asciiToCode the other way round.
+var codeToASCII = func() map[byte]rune {
+	m := map[byte]rune{}
+	for r, code := range asciiToCode {
+		m[code] = r
+	}
+	return m
+}()
+
+// CodeRune returns the ASCII character CharCode converts to an Odyssey2
+// character code, if there is one. A letter is upper case.
+func CodeRune(code byte) (rune, bool) {
+	r, ok := codeToASCII[code]
+	return r, ok
+}
+
 // CharCode converts an ASCII character to an Odyssey2 character code.
 // Unknown characters become a blank.
 func CharCode(r rune) byte {

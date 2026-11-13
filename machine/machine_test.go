@@ -617,7 +617,7 @@ func TestParseProgramBOM(t *testing.T) {
 // A remark that starts with a hex-like word must not be read as code once
 // it is set apart from the bytes by a wider gap.
 func TestParseProgramRemark(t *testing.T) {
-	p, err := ParseProgram(strings.NewReader("05 C0  BE QUIET\n10\t07 BE\tAD\n20 6B 00 LDV.B.00\n"))
+	p, err := ParseProgram(strings.NewReader("05 C0  BE QUIET\n10\t07 BE\tAD LIB\n20 6B 00 LDV.B.00\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

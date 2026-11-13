@@ -161,7 +161,9 @@ There is a row of buttons under the TV, and each one also has a function key:
   * POWER, which erases the program, when you haven't saved it
   * closing the window while you have a program you haven't saved
 * **MONITOR (F6)** opens a side panel showing the registers, the accumulator,
-  the program counter and a disassembly of program memory.
+  the program counter and a disassembly of program memory. Steps the
+  program can't reach from step 00 are data, such as the text of a message,
+  and are shown a byte to a line, with the letter if the byte is one.
 * **F7** colours the characters the way the manual's symbol chart does.
 * **HELP (F1)** shows a quick reference.
 
@@ -184,6 +186,19 @@ manual's tables load as they are:
 Each step may be given only once, and a line may not run past step 99.
 A listing is plain text in UTF-8, or in UTF-16 with a byte order mark, as
 some Windows tools save it.
+
+Put one space between the bytes of a line. If a tab or a wider gap is
+followed by nothing but more bytes, as in a listing with a column for each
+byte, the listing is refused rather than loaded without them.
+
+SAVE writes the steps a program can reach from step 00 as instructions.
+The other steps are data, such as the text of a message, and are written
+as bytes, with the text in quotes when they spell one:
+
+```
+28    12 24  GTO.24
+30    1D 12 0E 0E 17 00  "HELLO"
+```
 
 The manual's column headings and its remarks on lines of their own are not
 step lines: delete them, or start them with `;`. A remark straight after the

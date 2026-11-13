@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"image/color"
-	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -36,7 +35,7 @@ func (c canvas) circle(cx, cy, r float32, col color.Color) {
 
 // rrect fills a rounded rectangle.
 func (c canvas) rrect(x, y, w, h, r float32, col color.Color) {
-	r = float32(math.Min(float64(r), float64(math.Min(float64(w), float64(h))/2)))
+	r = min(r, min(w, h)/2)
 	c.rect(x+r, y, w-2*r, h, col)
 	c.rect(x, y+r, w, h-2*r, col)
 	c.circle(x+r, y+r, r, col)

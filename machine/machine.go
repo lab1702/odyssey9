@@ -328,6 +328,7 @@ func (m *Machine) Press(k Key) {
 func (m *Machine) Backspace() {
 	if m.mode == ModeInput && len(m.inBuf) > 0 {
 		m.inBuf = m.inBuf[:len(m.inBuf)-1]
+		m.note = "" // show the line again, as any key does
 	}
 }
 
@@ -441,7 +442,10 @@ func (m *Machine) enterStatement() {
 	var code []byte
 	if m.lang == ModeHex {
 		if len(m.inBuf) != 2 {
+			// A step is two hex digits. One alone isn't entered, but it
+			// stays, to be completed once the note has been seen.
 			m.errorBeep()
+			m.setNote("ERROR")
 			return
 		}
 		var v byte

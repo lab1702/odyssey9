@@ -122,6 +122,44 @@ var opByCode = func() (m [256]opInfo) {
 	return m
 }()
 
+// branches reports whether the instruction's operand is a step it can jump
+// to. LDV's is a value.
+func (o opInfo) branches() bool {
+	return o.form == formNN || o.form == formRNN && o.op != opLDV
+}
+
+// CodeSteps reports which steps hold the first byte of an instruction that
+// a program run from step 00 can reach, taking every branch both ways. The
+// other steps hold operands or data, such as the text of a message, which
+// would make no sense read as instructions. HLT counts as going on to the
+// next step, as C continues there. RET goes back to the step after a GTS,
+// which the GTS already leads to.
+func CodeSteps(mem *[Steps]byte) (code [Steps]bool) {
+	todo := []int{0}
+	for len(todo) > 0 {
+		s := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		for !code[s] {
+			code[s] = true
+			o, _ := decode(mem[s]) // an undefined opcode is a one-byte NOP
+			next := (s + o.size()) % Steps
+			if o.branches() {
+				target := bcdToStep(mem[(s+1)%Steps])
+				if o.op == opGTO {
+					next = target
+				} else {
+					todo = append(todo, target)
+				}
+			}
+			if o.op == opRET {
+				break
+			}
+			s = next
+		}
+	}
+	return code
+}
+
 // decode returns the instruction descriptor for an opcode byte.
 func decode(op byte) (opInfo, bool) {
 	o := opByCode[op]
